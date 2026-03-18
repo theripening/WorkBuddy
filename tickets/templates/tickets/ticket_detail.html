@@ -1,0 +1,166 @@
+{% extends 'tickets/base.html' %}
+
+{% block title %}{{ ticket.subject }} — WorkBuddy 2.0{% endblock %}
+
+{% block content %}
+
+<form id="upd-{{ ticket.pk }}" method="post" action="{% url 'tickets:update' ticket.pk %}" hidden>
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+</form>
+
+{# Header #}
+<div class="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
+    <div>
+        <a href="{% url 'tickets:list' %}" class="btn btn-outline-secondary btn-sm mb-2">
+            <i class="bi bi-arrow-left me-1"></i>Back
+        </a>
+        <h5 class="mb-0">{{ ticket.subject }}</h5>
+        <small class="text-muted">{{ ticket.emails.count }} email{{ ticket.emails.count|pluralize }} across {{ threads|length }} thread{{ threads|length|pluralize }}</small>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+        <select name="assignee" form="upd-{{ ticket.pk }}"
+                class="form-select form-select-sm" style="width:140px"
+                onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
+            {% for val, label in assignees %}
+            <option value="{{ val }}" {% if ticket.assignee == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="status" form="upd-{{ ticket.pk }}"
+                class="form-select form-select-sm" style="width:140px"
+                onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
+            {% for val, label in status_choices %}
+            <option value="{{ val }}" {% if ticket.status == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <form method="post" action="{% url 'tickets:delete' ticket.pk %}"
+              onsubmit="return confirm('Delete this ticket and all its emails?')">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-danger btn-sm">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+        </form>
+    </div>
+</div>
+
+{# Notes #}
+<div class="card shadow-sm mb-4">
+    <div class="card-body py-2">
+        <div class="input-group input-group-sm">
+            <span class="input-group-text bg-white border-end-0 text-muted">
+                <i class="bi bi-pencil me-1"></i>Notes
+            </span>
+            <textarea name="notes" form="upd-{{ ticket.pk }}"
+                      class="form-control border-start-0" rows="2"
+                      style="resize:vertical;">{{ ticket.notes }}</textarea>
+            <button type="submit" form="upd-{{ ticket.pk }}"
+                    class="btn btn-outline-primary" title="Save notes">
+                <i class="bi bi-check-lg"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+{# Threads #}
+{% for thread in threads %}
+{% with latest=thread.0 %}
+<div class="card shadow-sm mb-3">
+    <div class="card-header d-flex align-items-center justify-content-between py-2">
+        <div>
+            <span class="fw-semibold">{{ latest.subject }}</span>
+            <span class="text-muted small ms-2">{{ thread|length }} message{{ thread|length|pluralize }}</span>
+        </div>
+        <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-envelope-open me-1"></i>Open latest in Outlook
+            </button>
+        </form>
+    </div>
+
+    {# Latest reply preview #}
+    <div class="card-body py-2 border-bottom bg-light">
+        <div class="d-flex justify-content-between align-items-baseline mb-1">
+            <span class="fw-semibold small">{{ latest.sender }}</span>
+            <span class="text-muted small">{{ latest.received_at|date:"M j, Y g:i A" }}</span>
+        </div>
+        <p class="mb-0 small text-muted">{{ latest.body_preview|default:"(no preview available)" }}</p>
+    </div>
+
+    {# Older messages in thread (collapsed) #}
+    {% if thread|length > 1 %}
+    <div class="collapse" id="thread-{{ forloop.counter }}">
+        {% for email in thread %}
+        {% if not forloop.first %}
+        <div class="card-body py-2 border-bottom">
+            <div class="d-flex justify-content-between align-items-baseline mb-1">
+                <span class="fw-semibold small">{{ email.sender }}</span>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted small">{{ email.received_at|date:"M j, Y g:i A" }}</span>
+                    <form method="post" action="{% url 'tickets:open_in_outlook' email.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                        <button type="submit" class="btn btn-sm btn-link p-0 text-muted" title="Open in Outlook">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <p class="mb-0 small text-muted">{{ email.body_preview|default:"(no preview available)" }}</p>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    <div class="card-footer py-1 text-center">
+        <button class="btn btn-link btn-sm text-muted p-0"
+                data-bs-toggle="collapse" data-bs-target="#thread-{{ forloop.counter }}">
+            <i class="bi bi-chevron-down me-1"></i>
+            Show {{ thread|length|add:"-1" }} older message{{ thread|length|add:"-1"|pluralize }}
+        </button>
+    </div>
+    {% endif %}
+</div>
+{% endwith %}
+{% endfor %}
+
+{% if not threads %}
+<div class="text-center text-muted py-5 bg-white rounded shadow-sm">
+    <i class="bi bi-envelope display-3 d-block mb-3"></i>
+    <p>No emails synced for this ticket yet.</p>
+</div>
+{% endif %}
+
+{# Merge #}
+<div class="mt-4">
+    <button class="btn btn-outline-secondary btn-sm"
+            data-bs-toggle="collapse" data-bs-target="#merge-panel">
+        <i class="bi bi-diagram-2 me-1"></i>Merge another ticket into this one
+    </button>
+    <div class="collapse mt-2" id="merge-panel">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="small text-muted mb-2">
+                    All emails from the selected ticket will be moved here and that ticket will be deleted.
+                </p>
+                <form method="post" action="{% url 'tickets:merge' ticket.pk %}"
+                      onsubmit="return confirm('Merge the selected ticket into this one? The other ticket will be deleted.')">
+                    {% csrf_token %}
+                    <div class="input-group input-group-sm">
+                        <select name="source_ticket" class="form-select" required>
+                            <option value="">— Select a ticket —</option>
+                            {% for other in other_tickets %}
+                            <option value="{{ other.pk }}">{{ other.subject }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-arrow-down-up me-1"></i>Merge
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
