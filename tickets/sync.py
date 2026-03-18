@@ -101,70 +101,75 @@ def sync_tracked_folder():
     under Inbox, and sync emails + their full conversations into the DB.
     Returns (new_tickets, new_emails) counts.
     """
+    import pythoncom
     import win32com.client
 
-    outlook = win32com.client.Dispatch("Outlook.Application")
-    namespace = outlook.GetNamespace("MAPI")
-    inbox = namespace.GetDefaultFolder(6)  # 6 = olFolderInbox
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        namespace = outlook.GetNamespace("MAPI")
+        inbox = namespace.GetDefaultFolder(6)  # 6 = olFolderInbox
 
-    tracked = None
-    for folder in inbox.Folders:
-        if folder.Name == TRACKED_FOLDER_NAME:
-            tracked = folder
-            break
+        tracked = None
+        for folder in inbox.Folders:
+            if folder.Name == TRACKED_FOLDER_NAME:
+                tracked = folder
+                break
 
-    if tracked is None:
-        raise ValueError(
-            f'Outlook folder "{TRACKED_FOLDER_NAME}" not found under Inbox. '
-            "Create it and move emails there before syncing."
-        )
+        if tracked is None:
+            raise ValueError(
+                f'Outlook folder "{TRACKED_FOLDER_NAME}" not found under Inbox. '
+                "Create it and move emails there before syncing."
+            )
 
-    # Pre-load all known data to avoid per-item DB queries
-    # conv_id -> ticket_id mapping
-    known_convs = {}
-    for conv_id, ticket_id in TicketEmail.objects.values_list("conversation_id", "ticket_id"):
-        known_convs[conv_id] = ticket_id
+        # Pre-load all known data to avoid per-item DB queries
+        known_convs = {}
+        for conv_id, ticket_id in TicketEmail.objects.values_list("conversation_id", "ticket_id"):
+            known_convs[conv_id] = ticket_id
 
-    # Set of all known outlook_ids — checked before any GetItemFromID call
-    known_outlook_ids = set(TicketEmail.objects.values_list("outlook_id", flat=True))
+        # Set of all known outlook_ids — checked before any GetItemFromID call
+        known_outlook_ids = set(TicketEmail.objects.values_list("outlook_id", flat=True))
 
-    # Cache of ticket_id -> Ticket to avoid repeated DB fetches
-    tickets_cache = {}
+        # Cache of ticket_id -> Ticket to avoid repeated DB fetches
+        tickets_cache = {}
 
-    # Deduplicate: only process each conversation once per sync run
-    seen_conv_ids = set()
-    convs_to_process = []  # list of (conv_id, seed_item)
+        # Deduplicate: only process each conversation once per sync run
+        seen_conv_ids = set()
+        convs_to_process = []  # list of (conv_id, seed_item)
 
-    for item in tracked.Items:
-        try:
-            if item.Class != OL_MAIL_ITEM:
+        for item in tracked.Items:
+            try:
+                if item.Class != OL_MAIL_ITEM:
+                    continue
+                conv_id = item.ConversationID
+                if conv_id not in seen_conv_ids:
+                    seen_conv_ids.add(conv_id)
+                    convs_to_process.append((conv_id, item))
+            except Exception:
                 continue
-            conv_id = item.ConversationID
-            if conv_id not in seen_conv_ids:
-                seen_conv_ids.add(conv_id)
-                convs_to_process.append((conv_id, item))
-        except Exception:
-            continue
 
-    new_tickets = 0
-    new_emails = 0
+        new_tickets = 0
+        new_emails = 0
 
-    for conv_id, seed_item in convs_to_process:
-        try:
-            if conv_id in known_convs:
-                ticket_id = known_convs[conv_id]
-                if ticket_id not in tickets_cache:
-                    tickets_cache[ticket_id] = Ticket.objects.get(pk=ticket_id)
-                ticket = tickets_cache[ticket_id]
-            else:
-                ticket = Ticket.objects.create(subject=seed_item.Subject or "(no subject)")
-                known_convs[conv_id] = ticket.pk
-                tickets_cache[ticket.pk] = ticket
-                new_tickets += 1
+        for conv_id, seed_item in convs_to_process:
+            try:
+                if conv_id in known_convs:
+                    ticket_id = known_convs[conv_id]
+                    if ticket_id not in tickets_cache:
+                        tickets_cache[ticket_id] = Ticket.objects.get(pk=ticket_id)
+                    ticket = tickets_cache[ticket_id]
+                else:
+                    ticket = Ticket.objects.create(subject=seed_item.Subject or "(no subject)")
+                    known_convs[conv_id] = ticket.pk
+                    tickets_cache[ticket.pk] = ticket
+                    new_tickets += 1
 
-            new_emails += _sync_conversation(namespace, seed_item, ticket, known_outlook_ids)
+                new_emails += _sync_conversation(namespace, seed_item, ticket, known_outlook_ids)
 
-        except Exception:
-            continue
+            except Exception:
+                continue
 
-    return new_tickets, new_emails
+        return new_tickets, new_emails
+
+    finally:
+        pythoncom.CoUninitialize()

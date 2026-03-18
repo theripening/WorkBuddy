@@ -96,11 +96,16 @@ def ticket_delete(request, pk):
 def open_in_outlook(request, email_pk):
     email = get_object_or_404(TicketEmail, pk=email_pk)
     try:
+        import pythoncom
         import win32com.client
-        outlook = win32com.client.Dispatch("Outlook.Application")
-        namespace = outlook.GetNamespace("MAPI")
-        item = namespace.GetItemFromID(email.outlook_id)
-        item.Display()
+        pythoncom.CoInitialize()
+        try:
+            outlook = win32com.client.Dispatch("Outlook.Application")
+            namespace = outlook.GetNamespace("MAPI")
+            item = namespace.GetItemFromID(email.outlook_id)
+            item.Display()
+        finally:
+            pythoncom.CoUninitialize()
     except Exception as e:
         messages.error(request, f"Could not open in Outlook: {e}")
     return redirect(request.POST.get("next", "tickets:list"))
