@@ -77,6 +77,7 @@ def ticket_detail(request, pk):
 @require_POST
 def ticket_update(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
+    ticket.subject = request.POST.get("subject", ticket.subject) or ticket.subject
     ticket.assignee = request.POST.get("assignee", ticket.assignee)
     ticket.status = request.POST.get("status", ticket.status)
     ticket.notes = request.POST.get("notes", ticket.notes)
