@@ -243,19 +243,28 @@ def sync_tracked_folder():
             for col in _TABLE_COLUMNS:
                 sent_table.Columns.Add(col)
             sent_table.Columns.Add(PR_BODY_PREVIEW)
+            scanned = 0
+            no_class = 0
+            no_conv = 0
             while not sent_table.EndOfTable:
                 try:
                     row = sent_table.GetNextRow()
-                    if (_row_get(row, "MessageClass") or "") != "IPM.Note":
+                    scanned += 1
+                    msg_class = _row_get(row, "MessageClass") or ""
+                    if msg_class != "IPM.Note":
+                        no_class += 1
                         continue
                     cid = _row_get(row, "ConversationID")
                     if not cid:
+                        no_conv += 1
                         continue
                     row_dict = {col: _row_get(row, col) for col in _TABLE_COLUMNS}
                     row_dict[PR_BODY_PREVIEW] = _row_get(row, PR_BODY_PREVIEW)
                     sent_by_conv.setdefault(cid, []).append(row_dict)
-                except Exception:
+                except Exception as e:
+                    print(f"  Sent row error: {e}")
                     continue
+            print(f"  Sent pre-load: scanned={scanned} skipped_class={no_class} no_conv_id={no_conv}")
         except Exception as e:
             print(f"  Sent Items pre-load error: {e}")
         sent_total = sum(len(v) for v in sent_by_conv.values())
