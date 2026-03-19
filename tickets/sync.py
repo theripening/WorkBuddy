@@ -143,22 +143,28 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
             timings["early_out"] = True
             return [], timings
 
-        skipped_class = 0
+        skipped_known = 0
+        skipped_class = {}
+        skipped_err = 0
         for row in rows:
             entry_id = row["EntryID"]
             if entry_id in known_outlook_ids:
+                skipped_known += 1
                 continue
-            if row.get("MessageClass", "") != "IPM.Note":
-                skipped_class += 1
+            msg_class = row.get("MessageClass", "") or ""
+            if msg_class != "IPM.Note":
+                skipped_class[msg_class] = skipped_class.get(msg_class, 0) + 1
                 continue
             try:
                 new_emails.append(_build_email_from_row(ticket, row))
                 known_outlook_ids.add(entry_id)
             except Exception as e:
-                print(f"    SKIP row {entry_id[:20]}... — {e}")
+                print(f"    SKIP row build error: {e}")
+                skipped_err += 1
                 continue
-        if skipped_class:
-            timings["skipped_non_mail"] = skipped_class
+        timings["skipped_known"] = skipped_known
+        timings["skipped_class"] = skipped_class
+        timings["skipped_err"] = skipped_err
 
     except Exception:
         # GetConversation not available — fall back to seed item only
@@ -305,6 +311,15 @@ def sync_tracked_folder():
                     label = "skip"
                 else:
                     label = "upd "
+                skip_detail = []
+                if timings.get("skipped_known"):
+                    skip_detail.append(f"known={timings['skipped_known']}")
+                if timings.get("skipped_class"):
+                    for cls, n in timings["skipped_class"].items():
+                        skip_detail.append(f"class={cls!r}×{n}")
+                if timings.get("skipped_err"):
+                    skip_detail.append(f"err={timings['skipped_err']}")
+                skip_str = " skip[" + " ".join(skip_detail) + "]" if skip_detail else ""
                 print(
                     f"  [{idx:3d}/{len(convs_to_process)}] {label} | "
                     f"{elapsed:.3f}s total | "
@@ -312,7 +327,7 @@ def sync_tracked_folder():
                     f"GetConv={timings.get('GetConversation', 0):.3f}s "
                     f"Table={timings.get('GetTable+Columns', 0):.3f}s "
                     f"Walk={timings.get('TableWalk', 0):.3f}s "
-                    f"rows={rows} new={len(new_email_objs)} | "
+                    f"rows={rows} new={len(new_email_objs)}{skip_str} | "
                     f"{subject[:50]}"
                 )
 
