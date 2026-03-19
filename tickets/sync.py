@@ -62,7 +62,7 @@ def _row_get(row, key, default=None):
         return default
 
 
-def _build_email_from_row(ticket, row, namespace=None):
+def _build_email_from_row(ticket, row, namespace=None, conv_id=""):
     """Build TicketEmail from a conversation table row."""
     body = ""
     if namespace is not None:
@@ -77,7 +77,7 @@ def _build_email_from_row(ticket, row, namespace=None):
     return TicketEmail(
         ticket=ticket,
         outlook_id=row["EntryID"],
-        conversation_id=_row_get(row, "ConversationID", ""),
+        conversation_id=_row_get(row, "ConversationID") or conv_id,
         subject=_row_get(row, "Subject") or "(no subject)",
         sender=_row_get(row, "SenderName") or "",
         received_at=_parse_received_time(received_raw),
@@ -150,7 +150,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
                 try:
                     entry_id = row["EntryID"]
                     if entry_id not in emails_by_entry_id:
-                        emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row, namespace)
+                        emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row, namespace, conv_id)
                 except Exception as e:
                     print(f"    SKIP table row: {e}")
             timings["skipped_class"] = skipped_class
@@ -170,7 +170,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
         if not entry_id or entry_id in emails_by_entry_id:
             continue
         try:
-            emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row_dict, namespace)
+            emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row_dict, namespace, conv_id)
             sent_matches += 1
         except Exception as e:
             print(f"    SKIP sent row: {e}")
