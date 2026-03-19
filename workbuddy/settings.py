@@ -63,3 +63,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Days before an open/in-progress ticket with no activity is considered stale
+STALE_DAYS = 7

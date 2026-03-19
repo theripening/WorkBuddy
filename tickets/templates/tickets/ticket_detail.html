@@ -25,26 +25,30 @@
         <small class="text-muted">{{ ticket.emails.count }} email{{ ticket.emails.count|pluralize }} across {{ threads|length }} thread{{ threads|length|pluralize }}</small>
     </div>
     <div class="d-flex gap-2 flex-wrap align-items-center">
-        <div class="d-flex align-items-center gap-2">
-            <div class="form-check mb-0">
-                <input class="form-check-input" type="checkbox" name="todo" form="upd-{{ ticket.pk }}"
-                       id="todoCheck" {% if ticket.todo %}checked{% endif %}
-                       onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
-                <label class="form-check-label small" for="todoCheck">To-Do</label>
-            </div>
-            <input type="date" name="due_date" form="upd-{{ ticket.pk }}"
-                   value="{{ ticket.due_date|default:'' }}"
-                   class="form-control form-control-sm" style="width:150px"
-                   title="Due date"
-                   onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
-        </div>
+        <select name="priority" form="upd-{{ ticket.pk }}"
+                class="form-select form-select-sm" style="width:120px"
+                onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
+            <option value="">No Priority</option>
+            {% for val, label in priority_choices %}
+            <option value="{{ val }}" {% if ticket.priority == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
         <select name="assignee" form="upd-{{ ticket.pk }}"
                 class="form-select form-select-sm" style="width:140px"
                 onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
-            {% for val, label in assignees %}
-            <option value="{{ val }}" {% if ticket.assignee == val %}selected{% endif %}>{{ label }}</option>
+            <option value="" {% if not ticket.assignee %}selected{% endif %}>Me</option>
+            {% for a in assignees %}
+            <option value="{{ a.pk }}" {% if ticket.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
             {% endfor %}
         </select>
+        {% if ticket.assignee and ticket.assignee.email %}
+        <form method="post" action="{% url 'tickets:notify_ticket' ticket.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Notify {{ ticket.assignee.name }} via Outlook">
+                <i class="bi bi-send me-1"></i>Notify
+            </button>
+        </form>
+        {% endif %}
         <select name="status" form="upd-{{ ticket.pk }}"
                 class="form-select form-select-sm" style="width:140px"
                 onchange="document.getElementById('upd-{{ ticket.pk }}').submit()">
@@ -89,13 +93,78 @@
             <span class="fw-semibold">{{ latest.subject }}</span>
             <span class="text-muted small ms-2">{{ thread|length }} message{{ thread|length|pluralize }}</span>
         </div>
-        <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}">
-            {% csrf_token %}
-            <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
-            <button type="submit" class="btn btn-sm btn-outline-primary">
-                <i class="bi bi-envelope-open me-1"></i>Open latest in Outlook
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#todo-form-{{ forloop.counter }}">
+                <i class="bi bi-check2-square me-1"></i>To-Do
             </button>
-        </form>
+            <button class="btn btn-sm btn-outline-secondary"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#waiting-form-{{ forloop.counter }}">
+                <i class="bi bi-clock me-1"></i>Waiting
+            </button>
+            <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                <button type="submit" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-envelope-open me-1"></i>Open latest in Outlook
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {# Add To-Do inline form #}
+    <div class="collapse" id="todo-form-{{ forloop.counter }}">
+        <div class="card-body py-2 bg-light border-bottom">
+            <form method="post" action="{% url 'tickets:todo_add' ticket.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="thread_email_pk" value="{{ latest.pk }}">
+                <div class="row g-2 align-items-end">
+                    <div class="col">
+                        <input type="text" name="what" class="form-control form-control-sm" required placeholder="What needs to be done?">
+                    </div>
+                    <div class="col-auto">
+                        <select name="assignee" class="form-select form-select-sm" style="width:130px" title="Assign to">
+                            <option value="">Me</option>
+                            {% for a in assignees %}
+                            <option value="{{ a.pk }}">{{ a.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <input type="date" name="due_date" class="form-control form-control-sm" style="width:150px" title="Due date">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {# Waiting on inline form #}
+    <div class="collapse" id="waiting-form-{{ forloop.counter }}">
+        <div class="card-body py-2 bg-light border-bottom">
+            <form method="post" action="{% url 'tickets:waiting_on_add' ticket.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="thread_email_pk" value="{{ latest.pk }}">
+                <div class="row g-2 align-items-end">
+                    <div class="col">
+                        <input type="text" name="what" class="form-control form-control-sm" required placeholder="What are you waiting for?">
+                    </div>
+                    <div class="col-auto">
+                        <input type="text" name="from_who" class="form-control form-control-sm" placeholder="From who?" style="width:140px">
+                    </div>
+                    <div class="col-auto">
+                        <input type="date" name="expected_date" class="form-control form-control-sm" style="width:150px" title="Expected by">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
     </div>
 
     {# Latest reply preview #}
@@ -149,6 +218,180 @@
     <p>No emails synced for this ticket yet.</p>
 </div>
 {% endif %}
+
+{# To-Dos #}
+<div class="card shadow-sm mb-3">
+    <div class="card-header py-2 d-flex align-items-center justify-content-between">
+        <span class="fw-semibold"><i class="bi bi-check2-square me-1"></i>To-Dos</span>
+        <button class="btn btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-todo">
+            <i class="bi bi-plus-lg me-1"></i>Add
+        </button>
+    </div>
+    <div class="collapse" id="add-todo">
+        <div class="card-body border-bottom bg-light py-2">
+            <form method="post" action="{% url 'tickets:todo_add' ticket.pk %}">
+                {% csrf_token %}
+                <div class="row g-2 align-items-end">
+                    <div class="col">
+                        <input type="text" name="what" class="form-control form-control-sm" required placeholder="What needs to be done?">
+                    </div>
+                    <div class="col-auto">
+                        <select name="assignee" class="form-select form-select-sm" style="width:130px" title="Assign to">
+                            <option value="">Me</option>
+                            {% for a in assignees %}
+                            <option value="{{ a.pk }}">{{ a.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <input type="date" name="due_date" class="form-control form-control-sm" style="width:150px" title="Due date">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% if todos %}
+    <ul class="list-group list-group-flush">
+        {% for todo in todos %}
+        <li class="list-group-item py-2 {% if not todo.done and todo.due_date and todo.due_date < today %}list-group-item-danger{% elif todo.done %}list-group-item-light{% endif %}">
+            <div class="d-flex align-items-start justify-content-between gap-2">
+                <div>
+                    <span class="{% if todo.done %}text-muted text-decoration-line-through{% endif %}">{{ todo.what }}</span>
+                    {% if todo.assignee %}
+                    <span class="badge bg-primary ms-1" style="font-size:0.7rem">{{ todo.assignee.name }}</span>
+                    {% endif %}
+                    {% if todo.thread_email %}
+                    <span class="badge bg-light text-muted border ms-1" style="font-size:0.7rem">{{ todo.thread_email.subject|truncatechars:30 }}</span>
+                    {% endif %}
+                    {% if todo.done and todo.done_at %}
+                    <div class="small text-muted">Done {{ todo.done_at|date:"M j, Y" }}</div>
+                    {% endif %}
+                </div>
+                {% if not todo.done %}
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <form method="post" action="{% url 'tickets:todo_update' todo.pk %}" class="d-flex align-items-center gap-1">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                        <input type="date" name="due_date"
+                               value="{{ todo.due_date|date:'Y-m-d' }}"
+                               class="form-control form-control-sm {% if todo.due_date and todo.due_date < today %}border-danger text-danger{% endif %}"
+                               style="width:145px"
+                               onchange="this.form.submit()"
+                               title="Due date">
+                    </form>
+                    {% with notify_assignee=todo.assignee|default:ticket.assignee %}
+                    {% if notify_assignee and notify_assignee.email %}
+                    <form method="post" action="{% url 'tickets:notify_todo' todo.pk %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-secondary text-nowrap" title="Notify {{ notify_assignee.name }} via Outlook">
+                            <i class="bi bi-send me-1"></i>Notify {{ notify_assignee.name }}
+                        </button>
+                    </form>
+                    {% endif %}
+                    {% endwith %}
+                    <form method="post" action="{% url 'tickets:todo_done' todo.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                        <button type="submit" class="btn btn-sm btn-outline-success text-nowrap">
+                            <i class="bi bi-check-lg me-1"></i>Done
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card-body text-muted small py-2">No to-dos yet.</div>
+    {% endif %}
+</div>
+
+{# Waiting On #}
+<div class="card shadow-sm mb-3">
+    <div class="card-header py-2 d-flex align-items-center justify-content-between">
+        <span class="fw-semibold"><i class="bi bi-clock me-1"></i>Waiting On</span>
+        <button class="btn btn-outline-primary btn-sm" data-bs-toggle="collapse" data-bs-target="#add-waiting">
+            <i class="bi bi-plus-lg me-1"></i>Add
+        </button>
+    </div>
+
+    {# Add form #}
+    <div class="collapse" id="add-waiting">
+        <div class="card-body border-bottom bg-light py-2">
+            <form method="post" action="{% url 'tickets:waiting_on_add' ticket.pk %}">
+                {% csrf_token %}
+                <div class="row g-2 align-items-end">
+                    <div class="col">
+                        <label class="form-label form-label-sm mb-1">What are you waiting for?</label>
+                        <input type="text" name="what" class="form-control form-control-sm" required placeholder="e.g. Updated quote from vendor">
+                    </div>
+                    <div class="col-auto">
+                        <label class="form-label form-label-sm mb-1">From</label>
+                        <input type="text" name="from_who" class="form-control form-control-sm" placeholder="Who?" style="width:140px">
+                    </div>
+                    <div class="col-auto">
+                        <label class="form-label form-label-sm mb-1">Expected by</label>
+                        <input type="date" name="expected_date" class="form-control form-control-sm" style="width:150px">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {# Existing items #}
+    {% if waiting_on %}
+    <ul class="list-group list-group-flush">
+        {% for w in waiting_on %}
+        {% if not w.resolved %}
+        <li class="list-group-item py-2 {% if w.expected_date and w.expected_date < today %}list-group-item-danger{% endif %}">
+            <div class="d-flex align-items-start justify-content-between gap-2">
+                <div>
+                    <div class="fw-semibold small">{{ w.what }}</div>
+                    <div class="text-muted small">
+                        {% if w.from_who %}From: {{ w.from_who }} &nbsp;·&nbsp; {% endif %}
+                        Asked: {{ w.asked_date|date:"M j" }} &nbsp;·&nbsp;
+                        {% if w.expected_date %}
+                            Expected: <span class="{% if w.expected_date < today %}text-danger fw-semibold{% endif %}">{{ w.expected_date|date:"M j, Y" }}</span>
+                        {% else %}
+                            No expected date
+                        {% endif %}
+                        &nbsp;·&nbsp; {{ w.days_waiting }}d waiting
+                    </div>
+                </div>
+                <form method="post" action="{% url 'tickets:waiting_on_resolve' w.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                    <button type="submit" class="btn btn-sm btn-outline-success text-nowrap">
+                        <i class="bi bi-check-lg me-1"></i>Got it
+                    </button>
+                </form>
+            </div>
+        </li>
+        {% endif %}
+        {% endfor %}
+        {# Resolved items collapsed #}
+        {% with resolved_items=waiting_on|dictsort:"resolved_at" %}
+        {% for w in waiting_on %}{% if w.resolved %}
+        <li class="list-group-item py-2 text-muted small list-group-item-light">
+            <i class="bi bi-check2 me-1 text-success"></i>
+            <span class="text-decoration-line-through">{{ w.what }}</span>
+            {% if w.from_who %}<span class="ms-1">· {{ w.from_who }}</span>{% endif %}
+            <span class="ms-1">· resolved {{ w.resolved_at|date:"M j" }}</span>
+        </li>
+        {% endif %}{% endfor %}
+        {% endwith %}
+    </ul>
+    {% else %}
+    <div class="card-body text-muted small py-2">Nothing being tracked yet.</div>
+    {% endif %}
+</div>
 
 {# Merge #}
 <div class="mt-4">

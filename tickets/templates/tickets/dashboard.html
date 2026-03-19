@@ -1,0 +1,582 @@
+{% extends 'tickets/base.html' %}
+{% block title %}Dashboard — WorkBuddy 2.0{% endblock %}
+
+{% block content %}
+
+{# Hidden update forms for inline edits on Todo + All tabs #}
+{% for ticket in form_tickets %}
+<form id="upd-{{ ticket.pk }}" method="post" action="{% url 'tickets:update' ticket.pk %}" hidden>
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="hidden" name="subject" value="{{ ticket.subject }}">
+    <input type="hidden" name="assignee" value="{{ ticket.assignee_id|default:'' }}">
+    <input type="hidden" name="status" value="{{ ticket.status }}">
+    <input type="hidden" name="priority" value="{{ ticket.priority }}">
+    <input type="hidden" name="notes" value="{{ ticket.notes }}">
+</form>
+{% endfor %}
+
+{# Toolbar #}
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h5>
+    <div class="d-flex gap-2">
+        <a href="{% url 'tickets:create' %}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-plus-lg me-1"></i>New Ticket
+        </a>
+        <form method="post" action="{% url 'tickets:sync' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success btn-sm">
+                <i class="bi bi-arrow-clockwise me-1"></i>Sync Outlook
+            </button>
+        </form>
+    </div>
+</div>
+
+{# Stat cards #}
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <a href="?tab=todo" class="text-decoration-none">
+            <div class="card border-0 bg-danger text-white shadow-sm p-3 h-100">
+                <div style="font-size:2rem;font-weight:700;line-height:1">{{ overdue_count }}</div>
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;opacity:0.85" class="mt-1">Overdue</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="?tab=stale" class="text-decoration-none">
+            <div class="card border-0 bg-warning text-dark shadow-sm p-3 h-100">
+                <div style="font-size:2rem;font-weight:700;line-height:1">{{ stale_count }}</div>
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75" class="mt-1">Stale (&gt;{{ stale_days }}d)</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="?tab=waiting" class="text-decoration-none">
+            <div class="card border-0 bg-info text-dark shadow-sm p-3 h-100">
+                <div style="font-size:2rem;font-weight:700;line-height:1">{{ waiting_count }}</div>
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;opacity:0.75" class="mt-1">Waiting On</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-3">
+        <a href="?tab=open" class="text-decoration-none">
+            <div class="card border-0 bg-primary text-white shadow-sm p-3 h-100">
+                <div style="font-size:2rem;font-weight:700;line-height:1">{{ open_count }}</div>
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;opacity:0.85" class="mt-1">Total Open</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+{# Tabs nav #}
+<ul class="nav nav-tabs mb-0">
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'todo' %}active fw-semibold{% endif %}" href="?tab=todo">
+            <i class="bi bi-check2-square me-1"></i>To-Do
+            <span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ todo_tickets|length }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'stale' %}active fw-semibold{% endif %}" href="?tab=stale">
+            <i class="bi bi-hourglass-split me-1"></i>Stale
+            {% if stale_count %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">{{ stale_count }}</span>{% endif %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'triage' %}active fw-semibold{% endif %}" href="?tab=triage">
+            <i class="bi bi-inbox me-1"></i>Needs Triage
+            {% if triage_tickets %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">{{ triage_tickets|length }}</span>{% endif %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'recent' %}active fw-semibold{% endif %}" href="?tab=recent">
+            <i class="bi bi-envelope me-1"></i>Recent
+            {% if recent_tickets %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">{{ recent_tickets|length }}</span>{% endif %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'waiting' %}active fw-semibold{% endif %}" href="?tab=waiting">
+            <i class="bi bi-clock me-1"></i>Waiting On
+            {% if waiting_count %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">{{ waiting_count }}</span>{% endif %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'open' %}active fw-semibold{% endif %}" href="?tab=open">
+            <i class="bi bi-ticket-perforated me-1"></i>Open
+            <span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ open_count }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'unclear' %}active fw-semibold{% endif %}" href="?tab=unclear">
+            <i class="bi bi-question-circle me-1"></i>Unclear
+            {% if unclear_tickets %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">{{ unclear_tickets|length }}</span>{% endif %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'all' %}active fw-semibold{% endif %}" href="?tab=all">
+            <i class="bi bi-list me-1"></i>All Tickets
+        </a>
+    </li>
+</ul>
+
+<div class="bg-white border border-top-0 rounded-bottom shadow-sm p-3">
+
+{# ── TO-DO TAB ── #}
+{% if active_tab == "todo" %}
+{% if todo_items %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:36px"></th>
+            <th>To-Do</th>
+            <th style="width:120px">Due</th>
+            <th>Ticket</th>
+            <th style="width:80px">Priority</th>
+            <th style="width:200px">Thread</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in todo_items %}{% with item=row.item t=row.item.ticket %}
+    <tr class="{% if row.overdue %}table-danger{% endif %} priority-{{ t.priority }}">
+        <td class="text-center align-middle">
+            <form method="post" action="{% url 'tickets:todo_done' item.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'tickets:list' %}">
+                <button type="submit" class="btn btn-sm btn-outline-success p-1" title="Mark done">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+            </form>
+        </td>
+        <td>{{ item.what }}</td>
+        <td class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
+            {% if item.due_date %}
+                {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
+                {{ item.due_date|date:"M j, Y" }}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="small">
+            {% if item.thread_email %}
+            <form method="post" action="{% url 'tickets:open_in_outlook' item.thread_email.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="?tab=todo">
+                <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ item.thread_email.subject|truncatechars:35 }}
+                </button>
+            </form>
+            {% else %}—{% endif %}
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No to-dos. You're on top of it.</div>
+{% endif %}
+
+{# ── STALE TAB ── #}
+{% elif active_tab == "stale" %}
+<p class="text-muted small mb-2">Open or in-progress tickets with no activity for more than <strong>{{ stale_days }} days</strong>.</p>
+{% if stale_tickets %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:80px">Priority</th>
+            <th>Subject</th>
+            <th style="width:120px">Last Activity</th>
+            <th style="width:100px">Stale For</th>
+            <th style="width:110px">Assignee</th>
+            <th style="width:110px">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for item in stale_tickets %}{% with t=item.ticket %}
+    <tr class="priority-{{ t.priority }}">
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td class="text-muted small">{{ item.last_activity|date:"M j, Y" }}</td>
+        <td>
+            {% if item.days_stale >= 14 %}<span class="badge bg-danger">{{ item.days_stale }}d</span>
+            {% else %}<span class="badge bg-warning text-dark">{{ item.days_stale }}d</span>{% endif %}
+        </td>
+        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
+        <td>
+            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-hourglass display-4 d-block mb-2"></i>Nothing stale. Good cadence!</div>
+{% endif %}
+
+{# ── NEEDS TRIAGE TAB ── #}
+{% elif active_tab == "triage" %}
+<p class="text-muted small mb-2">Open tickets with no assignee — assign and triage these.</p>
+{% if triage_tickets %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:80px">Priority</th>
+            <th>Subject</th>
+            <th>Latest From</th>
+            <th style="width:130px">Received</th>
+            <th style="width:110px">Assignee</th>
+            <th style="width:80px"></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for item in triage_tickets %}{% with t=item.ticket %}
+    <tr class="priority-{{ t.priority }}">
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
+        <td class="small">{{ item.latest.received_at|date:"M j, Y g:i A"|default:"—" }}</td>
+        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
+        <td><a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Triage</a></td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-inbox display-4 d-block mb-2"></i>Everything has been triaged.</div>
+{% endif %}
+
+{# ── RECENT TAB ── #}
+{% elif active_tab == "recent" %}
+<p class="text-muted small mb-2">Tickets that received new emails in the last <strong>{{ stale_days }} days</strong>.</p>
+{% if recent_tickets %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:80px">Priority</th>
+            <th>Subject</th>
+            <th>Latest From</th>
+            <th style="width:130px">Received</th>
+            <th style="width:110px">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for item in recent_tickets %}{% with t=item.ticket %}
+    <tr class="priority-{{ t.priority }}">
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
+        <td class="small">{{ item.latest.received_at|date:"M j, Y g:i A"|default:"—" }}</td>
+        <td>
+            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>
+            {% else %}<span class="badge bg-secondary">Closed</span>{% endif %}
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-envelope display-4 d-block mb-2"></i>No recent email activity.</div>
+{% endif %}
+
+{# ── WAITING ON TAB ── #}
+{% elif active_tab == "waiting" %}
+<p class="text-muted small mb-2">Things you've asked for that haven't come back yet.</p>
+{% if waiting_on_list %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th>What</th>
+            <th style="width:160px">From</th>
+            <th>Ticket</th>
+            <th>Thread</th>
+            <th style="width:100px">Asked</th>
+            <th style="width:120px">Expected By</th>
+            <th style="width:90px">Waiting</th>
+            <th style="width:80px"></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in waiting_on_list %}{% with w=row.item %}
+    <tr class="{% if row.overdue %}table-danger{% endif %}">
+        <td>{{ w.what }}</td>
+        <td class="small text-muted">{{ w.from_who|default:"—" }}</td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' w.ticket.pk %}" class="text-decoration-none text-dark">{{ w.ticket.subject }}</a>
+        </td>
+        <td class="small">
+            {% if w.thread_email %}
+            <form method="post" action="{% url 'tickets:open_in_outlook' w.thread_email.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="?tab=waiting">
+                <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ w.thread_email.subject|truncatechars:40 }}
+                </button>
+            </form>
+            {% else %}—{% endif %}
+        </td>
+        <td class="small">{{ w.asked_date|date:"M j" }}</td>
+        <td class="small {% if row.overdue %}text-danger fw-semibold{% endif %}">
+            {% if w.expected_date %}
+                {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
+                {{ w.expected_date|date:"M j, Y" }}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td><span class="badge bg-secondary">{{ row.days_waiting }}d</span></td>
+        <td>
+            <form method="post" action="{% url 'tickets:waiting_on_resolve' w.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'tickets:detail' w.ticket.pk %}">
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Mark resolved">
+                    <i class="bi bi-check-lg"></i> Got it
+                </button>
+            </form>
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-clock display-4 d-block mb-2"></i>Not waiting on anything. Nice.</div>
+{% endif %}
+
+{# ── OPEN TAB ── #}
+{% elif active_tab == "open" %}
+{% if open_tickets %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:80px">Priority</th>
+            <th>Subject</th>
+            <th>Latest From</th>
+            <th style="width:130px">Last Email</th>
+            <th style="width:110px">Assignee</th>
+            <th style="width:110px">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for item in open_tickets %}{% with t=item.ticket %}
+    <tr class="{% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
+        <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
+        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
+        <td>
+            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No open tickets.</div>
+{% endif %}
+
+{# ── UNCLEAR TAB ── #}
+{% elif active_tab == "unclear" %}
+<p class="text-muted small mb-2">Open tickets with no to-dos and nothing being waited on — what's going on with these?</p>
+{% if unclear_tickets %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:80px">Priority</th>
+            <th>Subject</th>
+            <th>Latest From</th>
+            <th style="width:130px">Last Email</th>
+            <th style="width:110px">Assignee</th>
+            <th style="width:110px">Status</th>
+            <th style="width:80px"></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for item in unclear_tickets %}{% with t=item.ticket %}
+    <tr class="priority-{{ t.priority }}">
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
+        <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
+        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
+        <td>
+            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
+        </td>
+        <td><a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Review</a></td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-question-circle display-4 d-block mb-2"></i>All tickets have a to-do or something being waited on.</div>
+{% endif %}
+
+{# ── ALL TICKETS TAB ── #}
+{% else %}
+<form method="get" class="row g-2 mb-3 align-items-center">
+    <input type="hidden" name="tab" value="all">
+    <div class="col-auto">
+        <input type="text" name="q" class="form-control form-control-sm" placeholder="Search" value="{{ search }}">
+    </div>
+    <div class="col-auto">
+        <select name="status" class="form-select form-select-sm">
+            <option value="">All Statuses</option>
+            {% for val, label in status_choices %}
+            <option value="{{ val }}" {% if current_status == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <select name="assignee" class="form-select form-select-sm">
+            <option value="">All Assignees</option>
+            {% for a in assignees %}
+            <option value="{{ a.pk }}" {% if current_assignee == a.pk|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <select name="priority" class="form-select form-select-sm">
+            <option value="">All Priorities</option>
+            {% for val, label in priority_choices %}
+            <option value="{{ val }}" {% if current_priority == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" name="todo" id="todoFilter" value="1"
+                   {% if current_todo %}checked{% endif %} onchange="this.form.submit()">
+            <label class="form-check-label small" for="todoFilter">To-Do only</label>
+        </div>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="?tab=all" class="btn btn-outline-secondary btn-sm">Clear</a>
+    </div>
+</form>
+
+{% if all_tab_data %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-dark">
+        <tr>
+            <th style="width:80px">Priority</th>
+            <th>Subject</th>
+            <th style="width:110px">Assignee</th>
+            <th style="width:110px">Status</th>
+            <th>Latest Reply</th>
+            <th style="width:55px"></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for item in all_tab_data %}{% with t=item.ticket %}
+    <tr class="{% if t.status == 'closed' %}table-secondary{% elif t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td>
+            <select name="assignee" form="upd-{{ t.pk }}" class="form-select form-select-sm"
+                    onchange="document.getElementById('upd-{{ t.pk }}').submit()">
+                <option value="" {% if not t.assignee %}selected{% endif %}>Me</option>
+                {% for a in assignees %}
+                <option value="{{ a.pk }}" {% if t.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
+                {% endfor %}
+            </select>
+        </td>
+        <td>
+            <select name="status" form="upd-{{ t.pk }}" class="form-select form-select-sm"
+                    onchange="document.getElementById('upd-{{ t.pk }}').submit()">
+                {% for val, label in status_choices %}
+                <option value="{{ val }}" {% if t.status == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </td>
+        <td>
+            {% if item.latest %}
+            <div class="small fw-semibold">{{ item.latest.sender }}</div>
+            <div class="small text-muted text-truncate" style="max-width:220px">{{ item.latest.body_preview|default:"" }}</div>
+            {% else %}<span class="text-muted small">—</span>{% endif %}
+        </td>
+        <td class="text-center">
+            <form method="post" action="{% url 'tickets:delete' t.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger btn-sm"
+                        onclick="return confirm('Delete this ticket?')">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </form>
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="text-center text-muted py-4"><i class="bi bi-inbox display-4 d-block mb-2"></i>No tickets found.</div>
+{% endif %}
+{% endif %}
+
+</div>{# end tab content #}
+{% endblock %}
