@@ -236,12 +236,21 @@ def sync_tracked_folder():
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
             todo_folder = namespace.GetDefaultFolder(28)  # 28 = olFolderToDo
-            # Restrict to mail items only — To-Do folder also contains Task items
-            flagged_items = todo_folder.Items.Restrict(
-                f"[MessageClass] = 'IPM.Note' AND [FlagStatus] = {OL_FLAG_MARKED}"
-            )
+            # [FlagStatus] is not a valid Restrict column on virtual folders — check in Python
+            mail_items = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
             before = len(convs_to_process)
-            _collect_from_items(flagged_items)
+            count = mail_items.Count
+            for i in range(1, count + 1):
+                try:
+                    item = mail_items.Item(i)
+                    if item.FlagStatus != OL_FLAG_MARKED:
+                        continue
+                    conv_id = item.ConversationID
+                    if conv_id and conv_id not in seen_conv_ids:
+                        seen_conv_ids.add(conv_id)
+                        convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                except Exception:
+                    continue
             _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
 
         print(f"  Conversations to process: {len(convs_to_process)}")
