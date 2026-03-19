@@ -392,12 +392,25 @@ def sync_tracked_folder():
                 continue
 
         t0 = time.perf_counter()
-        TicketEmail.objects.bulk_create(to_bulk_create, ignore_conflicts=True)
-        _t(f"bulk_create ({len(to_bulk_create)} emails)", t0)
+        inserted = 0
+        errors = 0
+        try:
+            TicketEmail.objects.bulk_create(to_bulk_create, ignore_conflicts=True)
+            inserted = len(to_bulk_create)
+        except Exception as bulk_err:
+            print(f"  bulk_create failed ({bulk_err}) — falling back to one-by-one")
+            for obj in to_bulk_create:
+                try:
+                    obj.save()
+                    inserted += 1
+                except Exception as e:
+                    print(f"    SAVE ERROR outlook_id={obj.outlook_id!r} received_at={obj.received_at!r}: {e}")
+                    errors += 1
+        _t(f"save ({inserted} inserted, {errors} errors)", t0)
 
         total = time.perf_counter() - sync_start
-        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {len(to_bulk_create)} emails upserted ===\n")
-        return new_tickets, len(to_bulk_create)
+        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {inserted} emails saved ===\n")
+        return new_tickets, inserted
 
     finally:
         pythoncom.CoUninitialize()
