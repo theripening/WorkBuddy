@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from django.conf import settings
 from .models import Ticket, TicketEmail
@@ -9,6 +10,10 @@ PR_BODY_PREVIEW = "http://schemas.microsoft.com/mapi/proptag/0x0071001E"
 
 # All columns fetched in a single GetTable call — eliminates GetItemFromID per email
 _TABLE_COLUMNS = ["EntryID", "ConversationID", "MessageClass", "Subject", "SenderName", "ReceivedTime"]
+
+
+def _t(label, start):
+    print(f"  [{label}] {time.perf_counter() - start:.3f}s")
 
 
 def _parse_received_time(received_raw):
@@ -87,40 +92,51 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
     GetConversation), then everything else comes from table rows.
 
     Updates known_outlook_ids in place.
-    Returns list of unsaved TicketEmail instances.
+    Returns (list of unsaved TicketEmail instances, dict of timing info).
     """
     new_emails = []
+    timings = {}
 
+    t0 = time.perf_counter()
     try:
         seed_item = namespace.GetItemFromID(seed_entry_id)
     except Exception:
-        return new_emails
+        return new_emails, {"error": "GetItemFromID failed"}
+    timings["GetItemFromID"] = time.perf_counter() - t0
 
     try:
+        t0 = time.perf_counter()
         conversation = seed_item.GetConversation()
+        timings["GetConversation"] = time.perf_counter() - t0
+
         if conversation is None:
             if seed_entry_id not in known_outlook_ids:
                 new_emails.append(_build_email_obj(ticket, seed_item))
                 known_outlook_ids.add(seed_entry_id)
-            return new_emails
+            return new_emails, timings
 
-        # Fetch all needed columns up front — no GetItemFromID per email
+        t0 = time.perf_counter()
         table = conversation.GetTable()
         table.Columns.RemoveAll()
         for col in _TABLE_COLUMNS:
             table.Columns.Add(col)
         table.Columns.Add(PR_BODY_PREVIEW)
+        timings["GetTable+Columns"] = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         rows = []
         while not table.EndOfTable:
             try:
                 rows.append(table.GetNextRow())
             except Exception:
                 continue
+        timings["TableWalk"] = time.perf_counter() - t0
+        timings["row_count"] = len(rows)
 
         # Early-out: all entry IDs already known — nothing to do
         if all(row["EntryID"] in known_outlook_ids for row in rows):
-            return []
+            timings["early_out"] = True
+            return [], timings
 
         for row in rows:
             entry_id = row["EntryID"]
@@ -143,7 +159,7 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
             except Exception:
                 pass
 
-    return new_emails
+    return new_emails, timings
 
 
 def sync_tracked_folder():
@@ -159,20 +175,27 @@ def sync_tracked_folder():
     import pythoncom
     import win32com.client
 
+    sync_start = time.perf_counter()
+    print("\n=== WorkBuddy Sync Start ===")
+
     pythoncom.CoInitialize()
     try:
+        t0 = time.perf_counter()
         outlook = win32com.client.Dispatch("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
         inbox = namespace.GetDefaultFolder(6)  # 6 = olFolderInbox
+        _t("Outlook connect", t0)
 
         track_mode = getattr(settings, "TRACK_MODE", "folder")
+        print(f"  TRACK_MODE = {track_mode!r}")
 
         # Pre-load all known data in two DB queries
+        t0 = time.perf_counter()
         known_convs = {}
         for conv_id, ticket_id in TicketEmail.objects.values_list("conversation_id", "ticket_id"):
             known_convs[conv_id] = ticket_id
-
         known_outlook_ids = set(TicketEmail.objects.values_list("outlook_id", flat=True))
+        _t(f"DB pre-load ({len(known_convs)} convs, {len(known_outlook_ids)} emails)", t0)
 
         tickets_cache = {}
 
@@ -194,6 +217,7 @@ def sync_tracked_folder():
 
         # --- Tracked subfolder ---
         if track_mode in ("folder", "both"):
+            t0 = time.perf_counter()
             tracked = None
             for folder in inbox.Folders:
                 if folder.Name == TRACKED_FOLDER_NAME:
@@ -206,20 +230,30 @@ def sync_tracked_folder():
                 )
             if tracked is not None:
                 _collect_from_items(tracked.Items.Restrict("[MessageClass] = 'IPM.Note'"))
+            _t(f"Folder collection ({len(convs_to_process)} convs so far)", t0)
 
-        # --- Flagged emails in Inbox ---
+        # --- Flagged emails (To-Do virtual folder covers all mail folders) ---
         if track_mode in ("flag", "both"):
-            flagged = inbox.Items.Restrict(
-                f"[FlagStatus] = {OL_FLAG_MARKED} AND [MessageClass] = 'IPM.Note'"
+            t0 = time.perf_counter()
+            todo_folder = namespace.GetDefaultFolder(28)  # 28 = olFolderToDo
+            # Restrict to mail items only — To-Do folder also contains Task items
+            flagged_items = todo_folder.Items.Restrict(
+                f"[MessageClass] = 'IPM.Note' AND [FlagStatus] = {OL_FLAG_MARKED}"
             )
-            _collect_from_items(flagged)
+            before = len(convs_to_process)
+            _collect_from_items(flagged_items)
+            _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
+
+        print(f"  Conversations to process: {len(convs_to_process)}")
 
         new_tickets = 0
         to_bulk_create = []
 
-        for conv_id, entry_id, subject in convs_to_process:
+        for idx, (conv_id, entry_id, subject) in enumerate(convs_to_process, 1):
+            conv_start = time.perf_counter()
             try:
-                if conv_id in known_convs:
+                is_new = conv_id not in known_convs
+                if not is_new:
                     ticket_id = known_convs[conv_id]
                     if ticket_id not in tickets_cache:
                         tickets_cache[ticket_id] = Ticket.objects.get(pk=ticket_id)
@@ -230,15 +264,34 @@ def sync_tracked_folder():
                     tickets_cache[ticket.pk] = ticket
                     new_tickets += 1
 
-                new_email_objs = _sync_conversation(namespace, entry_id, ticket, known_outlook_ids)
+                new_email_objs, timings = _sync_conversation(namespace, entry_id, ticket, known_outlook_ids)
                 to_bulk_create.extend(new_email_objs)
 
-            except Exception:
+                elapsed = time.perf_counter() - conv_start
+                early = timings.get("early_out", False)
+                rows = timings.get("row_count", "?")
+                label = "NEW " if is_new else "skip" if early else "upd "
+                print(
+                    f"  [{idx:3d}/{len(convs_to_process)}] {label} | "
+                    f"{elapsed:.3f}s total | "
+                    f"GetItem={timings.get('GetItemFromID', 0):.3f}s "
+                    f"GetConv={timings.get('GetConversation', 0):.3f}s "
+                    f"Table={timings.get('GetTable+Columns', 0):.3f}s "
+                    f"Walk={timings.get('TableWalk', 0):.3f}s "
+                    f"rows={rows} new={len(new_email_objs)} | "
+                    f"{subject[:50]}"
+                )
+
+            except Exception as e:
+                print(f"  [{idx:3d}/{len(convs_to_process)}] ERROR: {e} | {subject[:50]}")
                 continue
 
-        # Bulk insert all new emails in one DB round-trip
+        t0 = time.perf_counter()
         TicketEmail.objects.bulk_create(to_bulk_create, ignore_conflicts=True)
+        _t(f"bulk_create ({len(to_bulk_create)} emails)", t0)
 
+        total = time.perf_counter() - sync_start
+        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {len(to_bulk_create)} new emails ===\n")
         return new_tickets, len(to_bulk_create)
 
     finally:
