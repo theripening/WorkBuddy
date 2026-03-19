@@ -60,6 +60,14 @@ def _build_email_obj(ticket, mail_item):
     )
 
 
+def _row_get(row, key, default=None):
+    """Safe key access on an Outlook COM Row object — Row supports [] but not .get()."""
+    try:
+        return row[key]
+    except Exception:
+        return default
+
+
 def _build_email_from_row(ticket, row):
     """Build TicketEmail from a conversation table row — zero extra COM calls."""
     body = ""
@@ -69,15 +77,15 @@ def _build_email_from_row(ticket, row):
             body = str(raw)[:300].strip()
     except Exception:
         pass
-    received_raw = row.get("ReceivedTime") or row.get("SentOn")
+    received_raw = _row_get(row, "ReceivedTime") or _row_get(row, "SentOn")
     if received_raw is None:
-        raise ValueError(f"No ReceivedTime or SentOn for EntryID {row.get('EntryID')}")
+        raise ValueError(f"No ReceivedTime or SentOn for EntryID {_row_get(row, 'EntryID')}")
     return TicketEmail(
         ticket=ticket,
         outlook_id=row["EntryID"],
-        conversation_id=row.get("ConversationID", ""),
-        subject=row.get("Subject") or "(no subject)",
-        sender=row.get("SenderName") or "",
+        conversation_id=_row_get(row, "ConversationID", ""),
+        subject=_row_get(row, "Subject") or "(no subject)",
+        sender=_row_get(row, "SenderName") or "",
         received_at=_parse_received_time(received_raw),
         body_preview=body,
     )
@@ -142,7 +150,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket):
 
             skipped_class = {}
             for row in rows:
-                msg_class = row.get("MessageClass", "") or ""
+                msg_class = _row_get(row, "MessageClass") or ""
                 if msg_class != "IPM.Note":
                     skipped_class[msg_class] = skipped_class.get(msg_class, 0) + 1
                     continue
