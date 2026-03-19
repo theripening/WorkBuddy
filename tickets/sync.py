@@ -9,7 +9,7 @@ OL_FLAG_MARKED = 2  # Outlook olFlagMarked constant
 PR_BODY_PREVIEW = "http://schemas.microsoft.com/mapi/proptag/0x0071001E"
 
 # All columns fetched in a single GetTable call — eliminates GetItemFromID per email
-_TABLE_COLUMNS = ["EntryID", "ConversationID", "MessageClass", "Subject", "SenderName", "ReceivedTime"]
+_TABLE_COLUMNS = ["EntryID", "ConversationID", "MessageClass", "Subject", "SenderName", "ReceivedTime", "SentOn"]
 
 
 def _t(label, start):
@@ -72,13 +72,17 @@ def _build_email_from_row(ticket, row):
             body = str(raw)[:300].strip()
     except Exception:
         pass
+    # ReceivedTime may be None for sent/draft items — fall back to SentOn
+    received_raw = row.get("ReceivedTime") or row.get("SentOn")
+    if received_raw is None:
+        raise ValueError(f"No ReceivedTime or SentOn for EntryID {row.get('EntryID')}")
     return TicketEmail(
         ticket=ticket,
         outlook_id=row["EntryID"],
         conversation_id=row.get("ConversationID", ""),
         subject=row.get("Subject") or "(no subject)",
         sender=row.get("SenderName") or "",
-        received_at=_parse_received_time(row["ReceivedTime"]),
+        received_at=_parse_received_time(received_raw),
         body_preview=body,
     )
 
@@ -110,6 +114,7 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
         timings["GetConversation"] = time.perf_counter() - t0
 
         if conversation is None:
+            timings["conv_none"] = True
             if seed_entry_id not in known_outlook_ids:
                 new_emails.append(_build_email_obj(ticket, seed_item))
                 known_outlook_ids.add(seed_entry_id)
@@ -138,17 +143,22 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
             timings["early_out"] = True
             return [], timings
 
+        skipped_class = 0
         for row in rows:
             entry_id = row["EntryID"]
             if entry_id in known_outlook_ids:
                 continue
             if row.get("MessageClass", "") != "IPM.Note":
+                skipped_class += 1
                 continue
             try:
                 new_emails.append(_build_email_from_row(ticket, row))
                 known_outlook_ids.add(entry_id)
-            except Exception:
+            except Exception as e:
+                print(f"    SKIP row {entry_id[:20]}... — {e}")
                 continue
+        if skipped_class:
+            timings["skipped_non_mail"] = skipped_class
 
     except Exception:
         # GetConversation not available — fall back to seed item only
@@ -236,19 +246,33 @@ def sync_tracked_folder():
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
             todo_folder = namespace.GetDefaultFolder(28)  # 28 = olFolderToDo
-            # [FlagStatus] is not a valid Restrict column on virtual folders — check in Python
-            mail_items = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
+            # Use GetTable instead of Items.Item(i) — fetches all rows in one server
+            # call with no per-item COM object, much faster than iterating Items
+            flag_table = todo_folder.GetTable()
+            flag_table.Columns.RemoveAll()
+            flag_table.Columns.Add("EntryID")
+            flag_table.Columns.Add("ConversationID")
+            flag_table.Columns.Add("MessageClass")
+            flag_table.Columns.Add("Subject")
+            # FlagStatus as a column works on Table even though it fails in Restrict
+            try:
+                flag_table.Columns.Add("FlagStatus")
+                has_flag_col = True
+            except Exception:
+                has_flag_col = False
+
             before = len(convs_to_process)
-            count = mail_items.Count
-            for i in range(1, count + 1):
+            while not flag_table.EndOfTable:
                 try:
-                    item = mail_items.Item(i)
-                    if item.FlagStatus != OL_FLAG_MARKED:
+                    row = flag_table.GetNextRow()
+                    if row.get("MessageClass", "") != "IPM.Note":
                         continue
-                    conv_id = item.ConversationID
+                    if has_flag_col and row.get("FlagStatus") != OL_FLAG_MARKED:
+                        continue
+                    conv_id = row.get("ConversationID", "")
                     if conv_id and conv_id not in seen_conv_ids:
                         seen_conv_ids.add(conv_id)
-                        convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                        convs_to_process.append((conv_id, row["EntryID"], row.get("Subject") or "(no subject)"))
                 except Exception:
                     continue
             _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
@@ -278,8 +302,16 @@ def sync_tracked_folder():
 
                 elapsed = time.perf_counter() - conv_start
                 early = timings.get("early_out", False)
+                conv_none = timings.get("conv_none", False)
                 rows = timings.get("row_count", "?")
-                label = "NEW " if is_new else "skip" if early else "upd "
+                if conv_none:
+                    label = "NONE"  # GetConversation() returned None — only seed stored
+                elif is_new:
+                    label = "NEW "
+                elif early:
+                    label = "skip"
+                else:
+                    label = "upd "
                 print(
                     f"  [{idx:3d}/{len(convs_to_process)}] {label} | "
                     f"{elapsed:.3f}s total | "
