@@ -6,6 +6,7 @@ from .models import Ticket, TicketEmail
 TRACKED_FOLDER_NAME = "Tracked"
 OL_FLAG_MARKED = 2  # Outlook olFlagMarked constant
 PR_BODY_PREVIEW = "http://schemas.microsoft.com/mapi/proptag/0x0071001E"
+PR_BODY_PREVIEW_W = "http://schemas.microsoft.com/mapi/proptag/0x0071001F"  # Unicode variant
 
 # Columns fetched in a single GetTable call
 _TABLE_COLUMNS = ["EntryID", "ConversationID", "MessageClass", "Subject", "SenderName", "ReceivedTime", "SentOn"]
@@ -34,13 +35,31 @@ def _safe_sender(item):
         return ""
 
 
+def _extract_preview_str(raw):
+    """Convert whatever PR_BODY_PREVIEW returns into a plain string, or return ''."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw[:300].strip()
+    if isinstance(raw, (bytes, bytearray)):
+        try:
+            return raw.decode("utf-8", errors="replace")[:300].strip()
+        except Exception:
+            return ""
+    # COM binary / memoryview / other — not usable as text
+    return ""
+
+
 def _safe_body_preview(item):
-    try:
-        preview = item.PropertyAccessor.GetProperty(PR_BODY_PREVIEW)
-        if preview:
-            return str(preview)[:300].strip()
-    except Exception:
-        pass
+    # Try Unicode variant first, then ANSI, then fall back to .Body
+    for prop in (PR_BODY_PREVIEW_W, PR_BODY_PREVIEW):
+        try:
+            raw = item.PropertyAccessor.GetProperty(prop)
+            result = _extract_preview_str(raw)
+            if result:
+                return result
+        except Exception:
+            continue
     try:
         return (item.Body or "")[:300].strip()
     except Exception:
@@ -70,13 +89,7 @@ def _row_get(row, key, default=None):
 
 def _build_email_from_row(ticket, row):
     """Build TicketEmail from a conversation table row — zero extra COM calls."""
-    body = ""
-    try:
-        raw = row[PR_BODY_PREVIEW]
-        if raw:
-            body = str(raw)[:300].strip()
-    except Exception:
-        pass
+    body = _extract_preview_str(_row_get(row, PR_BODY_PREVIEW_W) or _row_get(row, PR_BODY_PREVIEW))
     received_raw = _row_get(row, "ReceivedTime") or _row_get(row, "SentOn")
     if received_raw is None:
         raise ValueError(f"No ReceivedTime or SentOn for EntryID {_row_get(row, 'EntryID')}")
@@ -134,6 +147,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
             table.Columns.RemoveAll()
             for col in _TABLE_COLUMNS:
                 table.Columns.Add(col)
+            table.Columns.Add(PR_BODY_PREVIEW_W)
             table.Columns.Add(PR_BODY_PREVIEW)
             timings["GetTable"] = time.perf_counter() - t0
 
@@ -242,6 +256,7 @@ def sync_tracked_folder():
             sent_table.Columns.RemoveAll()
             for col in _TABLE_COLUMNS:
                 sent_table.Columns.Add(col)
+            sent_table.Columns.Add(PR_BODY_PREVIEW_W)
             sent_table.Columns.Add(PR_BODY_PREVIEW)
             scanned = 0
             no_class = 0
@@ -259,6 +274,7 @@ def sync_tracked_folder():
                         no_conv += 1
                         continue
                     row_dict = {col: _row_get(row, col) for col in _TABLE_COLUMNS}
+                    row_dict[PR_BODY_PREVIEW_W] = _row_get(row, PR_BODY_PREVIEW_W)
                     row_dict[PR_BODY_PREVIEW] = _row_get(row, PR_BODY_PREVIEW)
                     sent_by_conv.setdefault(cid, []).append(row_dict)
                 except Exception as e:
