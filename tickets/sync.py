@@ -7,6 +7,9 @@ OL_MAIL_ITEM = 43  # Outlook MailItem class constant
 OL_FLAG_MARKED = 2  # Outlook olFlagMarked constant
 PR_BODY_PREVIEW = "http://schemas.microsoft.com/mapi/proptag/0x0071001E"
 
+# All columns fetched in a single GetTable call — eliminates GetItemFromID per email
+_TABLE_COLUMNS = ["EntryID", "ConversationID", "MessageClass", "Subject", "SenderName", "ReceivedTime"]
+
 
 def _parse_received_time(received_raw):
     return datetime(
@@ -43,7 +46,7 @@ def _safe_body_preview(item):
 
 
 def _build_email_obj(ticket, mail_item):
-    """Build an unsaved TicketEmail instance."""
+    """Build TicketEmail from a live COM mail item (used in fallback paths only)."""
     return TicketEmail(
         ticket=ticket,
         outlook_id=mail_item.EntryID,
@@ -55,63 +58,103 @@ def _build_email_obj(ticket, mail_item):
     )
 
 
-def _sync_conversation(namespace, seed_item, ticket, known_outlook_ids):
+def _build_email_from_row(ticket, row):
+    """Build TicketEmail directly from a conversation table row — zero extra COM calls."""
+    body = ""
+    try:
+        raw = row[PR_BODY_PREVIEW]
+        if raw:
+            body = str(raw)[:300].strip()
+    except Exception:
+        pass
+    return TicketEmail(
+        ticket=ticket,
+        outlook_id=row["EntryID"],
+        conversation_id=row.get("ConversationID", ""),
+        subject=row.get("Subject") or "(no subject)",
+        sender=row.get("SenderName") or "",
+        received_at=_parse_received_time(row["ReceivedTime"]),
+        body_preview=body,
+    )
+
+
+def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
     """
-    Walk all items in the conversation and collect unsaved TicketEmail
-    objects for any EntryIDs not already in known_outlook_ids.
+    Walk all items in the conversation and collect unsaved TicketEmail objects.
+
+    Fetches all needed columns in a single GetTable call so no GetItemFromID
+    is required per email — only one GetItemFromID for the seed (needed to call
+    GetConversation), then everything else comes from table rows.
+
     Updates known_outlook_ids in place.
     Returns list of unsaved TicketEmail instances.
     """
     new_emails = []
+
+    try:
+        seed_item = namespace.GetItemFromID(seed_entry_id)
+    except Exception:
+        return new_emails
+
     try:
         conversation = seed_item.GetConversation()
         if conversation is None:
-            entry_id = seed_item.EntryID
-            if entry_id not in known_outlook_ids:
+            if seed_entry_id not in known_outlook_ids:
                 new_emails.append(_build_email_obj(ticket, seed_item))
-                known_outlook_ids.add(entry_id)
+                known_outlook_ids.add(seed_entry_id)
             return new_emails
 
-        # Collect all EntryIDs in one pass — no GetItemFromID yet
+        # Fetch all needed columns up front — no GetItemFromID per email
         table = conversation.GetTable()
         table.Columns.RemoveAll()
-        table.Columns.Add("EntryID")
+        for col in _TABLE_COLUMNS:
+            table.Columns.Add(col)
+        table.Columns.Add(PR_BODY_PREVIEW)
 
-        entry_ids = []
+        rows = []
         while not table.EndOfTable:
             try:
-                entry_ids.append(table.GetNextRow()["EntryID"])
+                rows.append(table.GetNextRow())
             except Exception:
                 continue
 
-        # Only fetch COM objects for entries we don't already have
-        for entry_id in entry_ids:
+        # Early-out: all entry IDs already known — nothing to do
+        if all(row["EntryID"] in known_outlook_ids for row in rows):
+            return []
+
+        for row in rows:
+            entry_id = row["EntryID"]
             if entry_id in known_outlook_ids:
                 continue
+            if row.get("MessageClass", "") != "IPM.Note":
+                continue
             try:
-                mail_item = namespace.GetItemFromID(entry_id)
-                if mail_item.Class != OL_MAIL_ITEM:
-                    continue
-                new_emails.append(_build_email_obj(ticket, mail_item))
+                new_emails.append(_build_email_from_row(ticket, row))
                 known_outlook_ids.add(entry_id)
             except Exception:
                 continue
 
     except Exception:
-        # GetConversation not available — fall back to seed only
-        entry_id = seed_item.EntryID
-        if entry_id not in known_outlook_ids:
-            new_emails.append(_build_email_obj(ticket, seed_item))
-            known_outlook_ids.add(entry_id)
+        # GetConversation not available — fall back to seed item only
+        if seed_entry_id not in known_outlook_ids:
+            try:
+                new_emails.append(_build_email_obj(ticket, seed_item))
+                known_outlook_ids.add(seed_entry_id)
+            except Exception:
+                pass
 
     return new_emails
 
 
 def sync_tracked_folder():
     """
-    Connect to the running Outlook instance, find the 'Tracked' subfolder
-    under Inbox, and sync emails + their full conversations into the DB.
-    Returns (new_tickets, new_emails) counts.
+    Connect to the running Outlook instance and sync tracked emails + their full
+    conversations into the DB. Returns (new_tickets, new_emails) counts.
+
+    Tracking sources are controlled by TRACK_MODE in settings:
+      "folder" — Inbox > Tracked subfolder
+      "flag"   — flagged (red flag) emails in Inbox
+      "both"   — either source (default)
     """
     import pythoncom
     import win32com.client
@@ -124,7 +167,7 @@ def sync_tracked_folder():
 
         track_mode = getattr(settings, "TRACK_MODE", "folder")
 
-        # Pre-load all known data to avoid per-item DB queries
+        # Pre-load all known data in two DB queries
         known_convs = {}
         for conv_id, ticket_id in TicketEmail.objects.values_list("conversation_id", "ticket_id"):
             known_convs[conv_id] = ticket_id
@@ -187,9 +230,7 @@ def sync_tracked_folder():
                     tickets_cache[ticket.pk] = ticket
                     new_tickets += 1
 
-                # Re-fetch the seed item by EntryID to avoid COM pointer reuse issues
-                seed_item = namespace.GetItemFromID(entry_id)
-                new_email_objs = _sync_conversation(namespace, seed_item, ticket, known_outlook_ids)
+                new_email_objs = _sync_conversation(namespace, entry_id, ticket, known_outlook_ids)
                 to_bulk_create.extend(new_email_objs)
 
             except Exception:
