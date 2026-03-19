@@ -246,35 +246,46 @@ def sync_tracked_folder():
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
             todo_folder = namespace.GetDefaultFolder(28)  # 28 = olFolderToDo
-            # Use GetTable instead of Items.Item(i) — fetches all rows in one server
-            # call with no per-item COM object, much faster than iterating Items
-            flag_table = todo_folder.GetTable()
-            flag_table.Columns.RemoveAll()
-            flag_table.Columns.Add("EntryID")
-            flag_table.Columns.Add("ConversationID")
-            flag_table.Columns.Add("MessageClass")
-            flag_table.Columns.Add("Subject")
-            # FlagStatus as a column works on Table even though it fails in Restrict
-            try:
-                flag_table.Columns.Add("FlagStatus")
-                has_flag_col = True
-            except Exception:
-                has_flag_col = False
-
             before = len(convs_to_process)
-            while not flag_table.EndOfTable:
-                try:
-                    row = flag_table.GetNextRow()
-                    if row.get("MessageClass", "") != "IPM.Note":
+
+            # GetTable() is fastest but doesn't work on all virtual folder configs —
+            # fall back to Items iteration if it throws
+            try:
+                flag_table = todo_folder.GetTable()
+                flag_table.Columns.RemoveAll()
+                for col in ["EntryID", "ConversationID", "MessageClass", "Subject", "FlagStatus"]:
+                    flag_table.Columns.Add(col)
+                print("  Flag collection: using GetTable()")
+                while not flag_table.EndOfTable:
+                    try:
+                        row = flag_table.GetNextRow()
+                        if row.get("MessageClass", "") != "IPM.Note":
+                            continue
+                        if row.get("FlagStatus") != OL_FLAG_MARKED:
+                            continue
+                        conv_id = row.get("ConversationID", "")
+                        if conv_id and conv_id not in seen_conv_ids:
+                            seen_conv_ids.add(conv_id)
+                            convs_to_process.append((conv_id, row["EntryID"], row.get("Subject") or "(no subject)"))
+                    except Exception:
                         continue
-                    if has_flag_col and row.get("FlagStatus") != OL_FLAG_MARKED:
+
+            except Exception as e:
+                print(f"  Flag collection: GetTable() failed ({e}), using Items iteration")
+                mail_items = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
+                count = mail_items.Count
+                for i in range(1, count + 1):
+                    try:
+                        item = mail_items.Item(i)
+                        if item.FlagStatus != OL_FLAG_MARKED:
+                            continue
+                        conv_id = item.ConversationID
+                        if conv_id and conv_id not in seen_conv_ids:
+                            seen_conv_ids.add(conv_id)
+                            convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                    except Exception:
                         continue
-                    conv_id = row.get("ConversationID", "")
-                    if conv_id and conv_id not in seen_conv_ids:
-                        seen_conv_ids.add(conv_id)
-                        convs_to_process.append((conv_id, row["EntryID"], row.get("Subject") or "(no subject)"))
-                except Exception:
-                    continue
+
             _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
 
         print(f"  Conversations to process: {len(convs_to_process)}")
