@@ -269,7 +269,12 @@ def sync_tracked_folder():
                         conv_id = item.ConversationID
                         if conv_id and conv_id not in seen_conv_ids:
                             seen_conv_ids.add(conv_id)
-                            convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                            # Re-fetch from MAPI by EntryID so the seed is a real
+                            # store-bound item — To-Do virtual folder items may carry
+                            # shortcut IDs that cause GetConversation() to fail or
+                            # return None.
+                            real_entry_id = namespace.GetItemFromID(item.EntryID).EntryID
+                            convs_to_process.append((conv_id, real_entry_id, item.Subject or "(no subject)"))
                     except Exception:
                         continue
             except Exception as e:
