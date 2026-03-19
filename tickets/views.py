@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from django.contrib import messages
 from django.db.models import Q
+from django.utils import timezone
 
 from .models import Ticket, TicketEmail, ASSIGNEES, STATUS_CHOICES
 
@@ -16,23 +17,39 @@ def ticket_list(request):
     tickets = all_tickets
     status_filter = request.GET.get("status", "")
     assignee_filter = request.GET.get("assignee", "")
+    todo_filter = request.GET.get("todo", "")
     search = request.GET.get("q", "")
 
     if status_filter:
         tickets = tickets.filter(status=status_filter)
     if assignee_filter:
         tickets = tickets.filter(assignee=assignee_filter)
+    if todo_filter:
+        tickets = tickets.filter(todo=True)
     if search:
         tickets = tickets.filter(
             Q(subject__icontains=search)
             | Q(emails__sender__icontains=search)
         ).distinct()
 
-    # Annotate each ticket with its latest email for preview
+    # Sort: overdue todos first, then todos with future due date, then todos
+    # with no due date, then non-todos (all by updated_at within each group)
+    today = timezone.now().date()
     ticket_list_data = []
     for ticket in tickets:
         latest = ticket.latest_email()
-        ticket_list_data.append({"ticket": ticket, "latest": latest})
+        if ticket.todo:
+            if ticket.due_date and ticket.due_date < today:
+                sort_key = (0, ticket.due_date.toordinal())   # overdue
+            elif ticket.due_date:
+                sort_key = (1, ticket.due_date.toordinal())   # due in future
+            else:
+                sort_key = (2, 0)                              # todo, no date
+        else:
+            sort_key = (3, 0)                                  # no todo
+        ticket_list_data.append({"ticket": ticket, "latest": latest, "sort_key": sort_key})
+
+    ticket_list_data.sort(key=lambda x: x["sort_key"])
 
     return render(request, "tickets/ticket_list.html", {
         "ticket_list_data": ticket_list_data,
@@ -40,17 +57,18 @@ def ticket_list(request):
         "status_choices": STATUS_CHOICES,
         "current_status": status_filter,
         "current_assignee": assignee_filter,
+        "current_todo": todo_filter,
         "search": search,
         "open_count": open_count,
         "in_progress_count": in_progress_count,
         "closed_count": closed_count,
+        "today": today,
     })
 
 
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
 
-    # Group emails by conversation_id, sorted newest-first within each group
     emails = ticket.emails.order_by("conversation_id", "-received_at")
 
     threads = {}
@@ -60,7 +78,6 @@ def ticket_detail(request, pk):
             threads[cid] = []
         threads[cid].append(email)
 
-    # Sort threads by the received_at of their latest email (newest thread first)
     sorted_threads = sorted(threads.values(), key=lambda t: t[0].received_at, reverse=True)
 
     other_tickets = Ticket.objects.exclude(pk=pk).order_by("subject")
@@ -71,7 +88,17 @@ def ticket_detail(request, pk):
         "other_tickets": other_tickets,
         "assignees": ASSIGNEES,
         "status_choices": STATUS_CHOICES,
+        "today": timezone.now().date(),
     })
+
+
+def ticket_create(request):
+    if request.method == "POST":
+        subject = request.POST.get("subject", "").strip() or "Untitled"
+        ticket = Ticket.objects.create(subject=subject)
+        messages.success(request, f'Ticket "{ticket.subject}" created.')
+        return redirect("tickets:detail", pk=ticket.pk)
+    return render(request, "tickets/ticket_create.html")
 
 
 @require_POST
@@ -81,6 +108,9 @@ def ticket_update(request, pk):
     ticket.assignee = request.POST.get("assignee", ticket.assignee)
     ticket.status = request.POST.get("status", ticket.status)
     ticket.notes = request.POST.get("notes", ticket.notes)
+    ticket.todo = "todo" in request.POST
+    due_date_raw = request.POST.get("due_date", "").strip()
+    ticket.due_date = due_date_raw if due_date_raw else None
     ticket.save()
     return redirect(request.POST.get("next", "tickets:list"))
 

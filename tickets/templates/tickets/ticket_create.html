@@ -1,0 +1,27 @@
+{% extends 'tickets/base.html' %}
+
+{% block title %}New Ticket — WorkBuddy 2.0{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <a href="{% url 'tickets:list' %}" class="btn btn-outline-secondary btn-sm mb-3">
+            <i class="bi bi-arrow-left me-1"></i>Back
+        </a>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3">New Ticket</h5>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Subject</label>
+                        <input type="text" name="subject" class="form-control" autofocus
+                               placeholder="What's this ticket about?">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Ticket</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

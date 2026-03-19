@@ -18,6 +18,8 @@ class Ticket(models.Model):
     assignee = models.CharField(max_length=50, choices=ASSIGNEES, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open")
     notes = models.TextField(blank=True)
+    todo = models.BooleanField(default=False)
+    due_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
