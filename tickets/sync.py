@@ -165,19 +165,21 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
     # --- Supplementary: Sent Items search by ConversationID ---
     # GetConversation().GetTable() only covers the seed's folder — sent replies
     # live in Sent Items and won't appear there.
+    # [ConversationID] is not a valid Restrict column, so we pre-filter by
+    # MessageClass (cheap) and then compare ConversationID in Python.
     try:
         t0 = time.perf_counter()
         sent_folder = namespace.GetDefaultFolder(5)  # olFolderSentMail
-        sent_items = sent_folder.Items.Restrict(f"[ConversationID] = '{conv_id}'")
+        sent_items = sent_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
         count = sent_items.Count
         new_sent = 0
         for i in range(1, count + 1):
             try:
                 item = sent_items.Item(i)
+                if item.ConversationID != conv_id:
+                    continue
                 entry_id = item.EntryID
                 if entry_id in known_outlook_ids:
-                    continue
-                if (item.MessageClass or "") != "IPM.Note":
                     continue
                 new_emails.append(_build_email_obj(ticket, item))
                 known_outlook_ids.add(entry_id)
