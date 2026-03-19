@@ -4,11 +4,10 @@ from django.conf import settings
 from .models import Ticket, TicketEmail
 
 TRACKED_FOLDER_NAME = "Tracked"
-OL_MAIL_ITEM = 43  # Outlook MailItem class constant
 OL_FLAG_MARKED = 2  # Outlook olFlagMarked constant
 PR_BODY_PREVIEW = "http://schemas.microsoft.com/mapi/proptag/0x0071001E"
 
-# All columns fetched in a single GetTable call — eliminates GetItemFromID per email
+# Columns fetched in a single GetTable call
 _TABLE_COLUMNS = ["EntryID", "ConversationID", "MessageClass", "Subject", "SenderName", "ReceivedTime", "SentOn"]
 
 
@@ -36,14 +35,12 @@ def _safe_sender(item):
 
 
 def _safe_body_preview(item):
-    # PR_BODY_PREVIEW is pre-cached on the server — much faster than .Body
     try:
         preview = item.PropertyAccessor.GetProperty(PR_BODY_PREVIEW)
         if preview:
             return str(preview)[:300].strip()
     except Exception:
         pass
-    # Fallback to .Body if MAPI property not available
     try:
         return (item.Body or "")[:300].strip()
     except Exception:
@@ -51,7 +48,7 @@ def _safe_body_preview(item):
 
 
 def _build_email_obj(ticket, mail_item):
-    """Build TicketEmail from a live COM mail item (used in fallback paths only)."""
+    """Build TicketEmail from a live COM mail item."""
     return TicketEmail(
         ticket=ticket,
         outlook_id=mail_item.EntryID,
@@ -64,7 +61,7 @@ def _build_email_obj(ticket, mail_item):
 
 
 def _build_email_from_row(ticket, row):
-    """Build TicketEmail directly from a conversation table row — zero extra COM calls."""
+    """Build TicketEmail from a conversation table row — zero extra COM calls."""
     body = ""
     try:
         raw = row[PR_BODY_PREVIEW]
@@ -72,7 +69,6 @@ def _build_email_from_row(ticket, row):
             body = str(raw)[:300].strip()
     except Exception:
         pass
-    # ReceivedTime may be None for sent/draft items — fall back to SentOn
     received_raw = row.get("ReceivedTime") or row.get("SentOn")
     if received_raw is None:
         raise ValueError(f"No ReceivedTime or SentOn for EntryID {row.get('EntryID')}")
@@ -87,30 +83,33 @@ def _build_email_from_row(ticket, row):
     )
 
 
-def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
+def _collect_conversation_emails(namespace, seed_entry_id, ticket):
     """
-    Walk all items in the conversation and collect unsaved TicketEmail objects.
+    Return all TicketEmail objects for the conversation containing seed_entry_id.
 
-    Primary path: GetConversation().GetTable() for the seed's folder.
-    Supplementary: Restrict Sent Items by ConversationID to capture sent replies,
-    which GetConversation().GetTable() typically misses.
+    Fetches fresh every sync — no 'already seen' filtering. Deduplicates
+    in-memory by EntryID; bulk_create(ignore_conflicts=True) handles DB dupes.
 
-    Updates known_outlook_ids in place.
-    Returns (list of unsaved TicketEmail instances, dict of timing info).
+    Two sources:
+      1. GetConversation().GetTable() — Outlook's built-in conversation view
+      2. Sent Items folder iterated by ConversationID — catches sent replies
+         that GetTable() misses when they live in a different folder
+
+    Returns (list of TicketEmail instances, dict of timing info).
     """
-    new_emails = []
     timings = {}
+    emails_by_entry_id = {}  # EntryID -> TicketEmail, deduped in memory
 
     t0 = time.perf_counter()
     try:
         seed_item = namespace.GetItemFromID(seed_entry_id)
     except Exception:
-        return new_emails, {"error": "GetItemFromID failed"}
+        return [], {"error": "GetItemFromID failed"}
     timings["GetItemFromID"] = time.perf_counter() - t0
 
     conv_id = seed_item.ConversationID
 
-    # --- Primary path: GetConversation().GetTable() ---
+    # --- Source 1: GetConversation().GetTable() ---
     try:
         t0 = time.perf_counter()
         conversation = seed_item.GetConversation()
@@ -123,7 +122,7 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
             for col in _TABLE_COLUMNS:
                 table.Columns.Add(col)
             table.Columns.Add(PR_BODY_PREVIEW)
-            timings["GetTable+Columns"] = time.perf_counter() - t0
+            timings["GetTable"] = time.perf_counter() - t0
 
             t0 = time.perf_counter()
             rows = []
@@ -133,75 +132,63 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
                 except Exception:
                     continue
             timings["TableWalk"] = time.perf_counter() - t0
-            timings["row_count"] = len(rows)
+            timings["table_rows"] = len(rows)
 
-            skipped_known = 0
             skipped_class = {}
-            skipped_err = 0
             for row in rows:
-                entry_id = row["EntryID"]
-                if entry_id in known_outlook_ids:
-                    skipped_known += 1
-                    continue
                 msg_class = row.get("MessageClass", "") or ""
                 if msg_class != "IPM.Note":
                     skipped_class[msg_class] = skipped_class.get(msg_class, 0) + 1
                     continue
                 try:
-                    new_emails.append(_build_email_from_row(ticket, row))
-                    known_outlook_ids.add(entry_id)
+                    entry_id = row["EntryID"]
+                    if entry_id not in emails_by_entry_id:
+                        emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row)
                 except Exception as e:
-                    print(f"    SKIP row build error: {e}")
-                    skipped_err += 1
-            timings["skipped_known"] = skipped_known
+                    print(f"    SKIP table row: {e}")
             timings["skipped_class"] = skipped_class
-            timings["skipped_err"] = skipped_err
         else:
             timings["conv_none"] = True
 
-    except Exception:
-        timings["conv_err"] = True
+    except Exception as e:
+        timings["conv_err"] = str(e)
 
-    # --- Supplementary: Sent Items search by ConversationID ---
-    # GetConversation().GetTable() only covers the seed's folder — sent replies
-    # live in Sent Items and won't appear there.
-    # [ConversationID] is not a valid Restrict column, so we pre-filter by
-    # MessageClass (cheap) and then compare ConversationID in Python.
+    # --- Source 2: Sent Items iterated by ConversationID ---
+    # GetTable() often misses sent replies in Sent Items.
+    # [ConversationID] can't be used in Restrict, so pre-filter by MessageClass
+    # then match ConversationID in Python.
     try:
         t0 = time.perf_counter()
         sent_folder = namespace.GetDefaultFolder(5)  # olFolderSentMail
         sent_items = sent_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
         count = sent_items.Count
-        new_sent = 0
+        sent_matches = 0
         for i in range(1, count + 1):
             try:
                 item = sent_items.Item(i)
                 if item.ConversationID != conv_id:
                     continue
                 entry_id = item.EntryID
-                if entry_id in known_outlook_ids:
-                    continue
-                new_emails.append(_build_email_obj(ticket, item))
-                known_outlook_ids.add(entry_id)
-                new_sent += 1
+                sent_matches += 1
+                if entry_id not in emails_by_entry_id:
+                    emails_by_entry_id[entry_id] = _build_email_obj(ticket, item)
             except Exception:
                 continue
-        timings["sent_search"] = time.perf_counter() - t0
-        timings["sent_count"] = count
-        timings["sent_new"] = new_sent
+        timings["sent_scanned"] = count
+        timings["sent_matches"] = sent_matches
+        timings["SentSearch"] = time.perf_counter() - t0
     except Exception as e:
         timings["sent_err"] = str(e)
 
-    # Last resort: if nothing at all was captured, store the seed directly
-    if not new_emails and seed_entry_id not in known_outlook_ids:
+    # --- Last resort: at minimum store the seed itself ---
+    if not emails_by_entry_id and seed_entry_id not in emails_by_entry_id:
         try:
-            new_emails.append(_build_email_obj(ticket, seed_item))
-            known_outlook_ids.add(seed_entry_id)
+            emails_by_entry_id[seed_entry_id] = _build_email_obj(ticket, seed_item)
             timings["seed_fallback"] = True
         except Exception:
             pass
 
-    return new_emails, timings
+    return list(emails_by_entry_id.values()), timings
 
 
 def sync_tracked_folder():
@@ -213,6 +200,9 @@ def sync_tracked_folder():
       "folder" — Inbox > Tracked subfolder
       "flag"   — flagged (red flag) emails in Inbox
       "both"   — either source (default)
+
+    Each sync fetches the full conversation fresh — no incremental tracking.
+    bulk_create(ignore_conflicts=True) deduplicates at the DB level.
     """
     import pythoncom
     import win32com.client
@@ -231,13 +221,12 @@ def sync_tracked_folder():
         track_mode = getattr(settings, "TRACK_MODE", "folder")
         print(f"  TRACK_MODE = {track_mode!r}")
 
-        # Pre-load all known data in two DB queries
+        # Pre-load known conversations so we can map conv_id -> ticket
         t0 = time.perf_counter()
         known_convs = {}
         for conv_id, ticket_id in TicketEmail.objects.values_list("conversation_id", "ticket_id"):
             known_convs[conv_id] = ticket_id
-        known_outlook_ids = set(TicketEmail.objects.values_list("outlook_id", flat=True))
-        _t(f"DB pre-load ({len(known_convs)} convs, {len(known_outlook_ids)} emails)", t0)
+        _t(f"DB pre-load ({len(known_convs)} known conversations)", t0)
 
         tickets_cache = {}
 
@@ -250,10 +239,10 @@ def sync_tracked_folder():
             for i in range(1, count + 1):
                 try:
                     item = mail_items.Item(i)
-                    conv_id = item.ConversationID
-                    if conv_id not in seen_conv_ids:
-                        seen_conv_ids.add(conv_id)
-                        convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                    cid = item.ConversationID
+                    if cid not in seen_conv_ids:
+                        seen_conv_ids.add(cid)
+                        convs_to_process.append((cid, item.EntryID, item.Subject or "(no subject)"))
                 except Exception:
                     continue
 
@@ -277,8 +266,9 @@ def sync_tracked_folder():
         # --- Flagged emails via To-Do special folder ---
         # olFolderToDo aggregates flagged items from all folders — no recursion needed.
         # GetTable() and FlagStatus in Restrict both fail on this virtual folder, so
-        # we Restrict by MessageClass only (works), then use ConversationID presence
-        # to identify email items (tasks have no ConversationID).
+        # we Restrict by MessageClass only, then check FlagStatus in Python.
+        # Re-fetch each seed via GetItemFromID to get a real store-bound item so
+        # GetConversation() works correctly.
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
             before = len(convs_to_process)
@@ -290,17 +280,15 @@ def sync_tracked_folder():
                 for i in range(1, count + 1):
                     try:
                         item = mail_todos.Item(i)
-                        if item.FlagStatus != OL_FLAG_MARKED:  # skip completed flags
+                        if item.FlagStatus != OL_FLAG_MARKED:
                             continue
-                        conv_id = item.ConversationID
-                        if conv_id and conv_id not in seen_conv_ids:
-                            seen_conv_ids.add(conv_id)
-                            # Re-fetch from MAPI by EntryID so the seed is a real
-                            # store-bound item — To-Do virtual folder items may carry
-                            # shortcut IDs that cause GetConversation() to fail or
-                            # return None.
+                        cid = item.ConversationID
+                        if cid and cid not in seen_conv_ids:
+                            seen_conv_ids.add(cid)
+                            # Re-fetch from MAPI — virtual folder items may have
+                            # shortcut EntryIDs that cause GetConversation() to fail
                             real_entry_id = namespace.GetItemFromID(item.EntryID).EntryID
-                            convs_to_process.append((conv_id, real_entry_id, item.Subject or "(no subject)"))
+                            convs_to_process.append((cid, real_entry_id, item.Subject or "(no subject)"))
                     except Exception:
                         continue
             except Exception as e:
@@ -327,43 +315,32 @@ def sync_tracked_folder():
                     tickets_cache[ticket.pk] = ticket
                     new_tickets += 1
 
-                new_email_objs, timings = _sync_conversation(namespace, entry_id, ticket, known_outlook_ids)
-                to_bulk_create.extend(new_email_objs)
+                email_objs, timings = _collect_conversation_emails(namespace, entry_id, ticket)
+                to_bulk_create.extend(email_objs)
 
                 elapsed = time.perf_counter() - conv_start
-                early = timings.get("early_out", False)
-                conv_none = timings.get("conv_none", False)
-                rows = timings.get("row_count", "?")
-                if conv_none:
-                    label = "NONE"  # GetConversation() returned None — only seed stored
-                elif is_new:
-                    label = "NEW "
-                elif early:
-                    label = "skip"
-                else:
-                    label = "upd "
-                skip_detail = []
-                if timings.get("skipped_known"):
-                    skip_detail.append(f"known={timings['skipped_known']}")
+                label = "NEW " if is_new else "sync"
+                table_rows = timings.get("table_rows", "?")
+                sent_matches = timings.get("sent_matches", "?")
+                skip_str = ""
                 if timings.get("skipped_class"):
-                    for cls, n in timings["skipped_class"].items():
-                        skip_detail.append(f"class={cls!r}×{n}")
-                if timings.get("skipped_err"):
-                    skip_detail.append(f"err={timings['skipped_err']}")
-                skip_str = " skip[" + " ".join(skip_detail) + "]" if skip_detail else ""
-                sent_str = (
-                    f" sent={timings.get('sent_count', '?')}(+{timings.get('sent_new', 0)})"
-                    if "sent_count" in timings else
-                    f" sent_err={timings.get('sent_err', '?')}" if "sent_err" in timings else ""
-                )
+                    parts = [f"{cls!r}×{n}" for cls, n in timings["skipped_class"].items()]
+                    skip_str = " skip[" + " ".join(parts) + "]"
+                extras = []
+                if timings.get("conv_none"):
+                    extras.append("conv=None")
+                if timings.get("conv_err"):
+                    extras.append(f"conv_err={timings['conv_err']!r}")
+                if timings.get("sent_err"):
+                    extras.append(f"sent_err={timings['sent_err']!r}")
+                if timings.get("seed_fallback"):
+                    extras.append("seed_fallback")
+                extra_str = " [" + " ".join(extras) + "]" if extras else ""
                 print(
                     f"  [{idx:3d}/{len(convs_to_process)}] {label} | "
-                    f"{elapsed:.3f}s total | "
-                    f"GetItem={timings.get('GetItemFromID', 0):.3f}s "
-                    f"GetConv={timings.get('GetConversation', 0):.3f}s "
-                    f"Table={timings.get('GetTable+Columns', 0):.3f}s "
-                    f"Walk={timings.get('TableWalk', 0):.3f}s "
-                    f"rows={rows} new={len(new_email_objs)}{skip_str}{sent_str} | "
+                    f"{elapsed:.3f}s | "
+                    f"table={table_rows} sent={sent_matches} total={len(email_objs)}"
+                    f"{skip_str}{extra_str} | "
                     f"{subject[:50]}"
                 )
 
@@ -376,7 +353,7 @@ def sync_tracked_folder():
         _t(f"bulk_create ({len(to_bulk_create)} emails)", t0)
 
         total = time.perf_counter() - sync_start
-        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {len(to_bulk_create)} new emails ===\n")
+        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {len(to_bulk_create)} emails upserted ===\n")
         return new_tickets, len(to_bulk_create)
 
     finally:
