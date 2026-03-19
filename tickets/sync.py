@@ -1,8 +1,10 @@
 from datetime import datetime
+from django.conf import settings
 from .models import Ticket, TicketEmail
 
 TRACKED_FOLDER_NAME = "Tracked"
 OL_MAIL_ITEM = 43  # Outlook MailItem class constant
+OL_FLAG_MARKED = 2  # Outlook olFlagMarked constant
 PR_BODY_PREVIEW = "http://schemas.microsoft.com/mapi/proptag/0x0071001E"
 
 
@@ -120,17 +122,7 @@ def sync_tracked_folder():
         namespace = outlook.GetNamespace("MAPI")
         inbox = namespace.GetDefaultFolder(6)  # 6 = olFolderInbox
 
-        tracked = None
-        for folder in inbox.Folders:
-            if folder.Name == TRACKED_FOLDER_NAME:
-                tracked = folder
-                break
-
-        if tracked is None:
-            raise ValueError(
-                f'Outlook folder "{TRACKED_FOLDER_NAME}" not found under Inbox. '
-                "Create it and move emails there before syncing."
-            )
+        track_mode = getattr(settings, "TRACK_MODE", "folder")
 
         # Pre-load all known data to avoid per-item DB queries
         known_convs = {}
@@ -141,24 +133,43 @@ def sync_tracked_folder():
 
         tickets_cache = {}
 
-        # Use Restrict to pre-filter to MailItems only — avoids .Class check per item
-        mail_items = tracked.Items.Restrict("[MessageClass] = 'IPM.Note'")
-
-        # Deduplicate by ConversationID, using index access to avoid COM pointer reuse
+        # Collect seed items from configured sources, deduplicating by ConversationID
         seen_conv_ids = set()
-        convs_to_process = []  # list of (conv_id, entry_id)
+        convs_to_process = []  # list of (conv_id, entry_id, subject)
 
-        count = mail_items.Count
-        for i in range(1, count + 1):  # Outlook collections are 1-indexed
-            try:
-                item = mail_items.Item(i)
-                conv_id = item.ConversationID
-                if conv_id not in seen_conv_ids:
-                    seen_conv_ids.add(conv_id)
-                    # Store EntryID string, not the COM object, to avoid pointer reuse
-                    convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
-            except Exception:
-                continue
+        def _collect_from_items(mail_items):
+            count = mail_items.Count
+            for i in range(1, count + 1):
+                try:
+                    item = mail_items.Item(i)
+                    conv_id = item.ConversationID
+                    if conv_id not in seen_conv_ids:
+                        seen_conv_ids.add(conv_id)
+                        convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                except Exception:
+                    continue
+
+        # --- Tracked subfolder ---
+        if track_mode in ("folder", "both"):
+            tracked = None
+            for folder in inbox.Folders:
+                if folder.Name == TRACKED_FOLDER_NAME:
+                    tracked = folder
+                    break
+            if tracked is None and track_mode == "folder":
+                raise ValueError(
+                    f'Outlook folder "{TRACKED_FOLDER_NAME}" not found under Inbox. '
+                    "Create it and move emails there, or set TRACK_MODE = 'flag'."
+                )
+            if tracked is not None:
+                _collect_from_items(tracked.Items.Restrict("[MessageClass] = 'IPM.Note'"))
+
+        # --- Flagged emails in Inbox ---
+        if track_mode in ("flag", "both"):
+            flagged = inbox.Items.Restrict(
+                f"[FlagStatus] = {OL_FLAG_MARKED} AND [MessageClass] = 'IPM.Note'"
+            )
+            _collect_from_items(flagged)
 
         new_tickets = 0
         to_bulk_create = []

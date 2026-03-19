@@ -66,3 +66,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Days before an open/in-progress ticket with no activity is considered stale
 STALE_DAYS = 7
+
+# Controls which Outlook emails are pulled into WorkBuddy during sync.
+# "folder" — only emails in the Inbox > Tracked subfolder
+# "flag"   — only flagged (red flag) emails in the Inbox
+# "both"   — either flagged OR in the Tracked subfolder
+TRACK_MODE = "both"
