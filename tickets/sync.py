@@ -46,7 +46,8 @@ def _extract_preview_str(raw):
             return raw.decode("utf-8", errors="replace")[:300].strip()
         except Exception:
             return ""
-    # COM binary / memoryview / other — not usable as text
+    # Unexpected type — log once so we know what we're dealing with
+    print(f"    [body_preview] unexpected type {type(raw).__name__!r}: {repr(raw)[:80]}")
     return ""
 
 
@@ -87,9 +88,16 @@ def _row_get(row, key, default=None):
         return default
 
 
-def _build_email_from_row(ticket, row):
-    """Build TicketEmail from a conversation table row — zero extra COM calls."""
+def _build_email_from_row(ticket, row, namespace=None):
+    """Build TicketEmail from a conversation table row."""
     body = _extract_preview_str(_row_get(row, PR_BODY_PREVIEW_W) or _row_get(row, PR_BODY_PREVIEW))
+    if not body and namespace is not None:
+        # MAPI preview columns returned nothing — fetch body via live item
+        try:
+            live = namespace.GetItemFromID(row["EntryID"])
+            body = (live.Body or "")[:300].strip()
+        except Exception:
+            pass
     received_raw = _row_get(row, "ReceivedTime") or _row_get(row, "SentOn")
     if received_raw is None:
         raise ValueError(f"No ReceivedTime or SentOn for EntryID {_row_get(row, 'EntryID')}")
@@ -171,7 +179,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
                 try:
                     entry_id = row["EntryID"]
                     if entry_id not in emails_by_entry_id:
-                        emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row)
+                        emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row, namespace)
                 except Exception as e:
                     print(f"    SKIP table row: {e}")
             timings["skipped_class"] = skipped_class
@@ -191,7 +199,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
         if not entry_id or entry_id in emails_by_entry_id:
             continue
         try:
-            emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row_dict)
+            emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row_dict, namespace)
             sent_matches += 1
         except Exception as e:
             print(f"    SKIP sent row: {e}")
