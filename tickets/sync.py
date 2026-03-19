@@ -100,20 +100,25 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket):
     timings = {}
     emails_by_entry_id = {}  # EntryID -> TicketEmail, deduped in memory
 
+    print(f"    GetItemFromID...", end=" ", flush=True)
     t0 = time.perf_counter()
     try:
         seed_item = namespace.GetItemFromID(seed_entry_id)
     except Exception:
+        print("FAILED")
         return [], {"error": "GetItemFromID failed"}
     timings["GetItemFromID"] = time.perf_counter() - t0
+    print(f"{timings['GetItemFromID']:.3f}s")
 
     conv_id = seed_item.ConversationID
 
     # --- Source 1: GetConversation().GetTable() ---
+    print(f"    GetConversation...", end=" ", flush=True)
     try:
         t0 = time.perf_counter()
         conversation = seed_item.GetConversation()
         timings["GetConversation"] = time.perf_counter() - t0
+        print(f"{timings['GetConversation']:.3f}s", end=" ")
 
         if conversation is not None:
             t0 = time.perf_counter()
@@ -133,6 +138,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket):
                     continue
             timings["TableWalk"] = time.perf_counter() - t0
             timings["table_rows"] = len(rows)
+            print(f"table_rows={len(rows)}")
 
             skipped_class = {}
             for row in rows:
@@ -148,9 +154,11 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket):
                     print(f"    SKIP table row: {e}")
             timings["skipped_class"] = skipped_class
         else:
+            print("None")
             timings["conv_none"] = True
 
     except Exception as e:
+        print(f"ERROR: {e}")
         timings["conv_err"] = str(e)
 
     # --- Source 2: Sent Items iterated by ConversationID ---
@@ -162,6 +170,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket):
         sent_folder = namespace.GetDefaultFolder(5)  # olFolderSentMail
         sent_items = sent_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
         count = sent_items.Count
+        print(f"    Sent Items scan ({count} items)...", end=" ", flush=True)
         sent_matches = 0
         for i in range(1, count + 1):
             try:
@@ -177,7 +186,9 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket):
         timings["sent_scanned"] = count
         timings["sent_matches"] = sent_matches
         timings["SentSearch"] = time.perf_counter() - t0
+        print(f"{timings['SentSearch']:.3f}s matched={sent_matches}")
     except Exception as e:
+        print(f"ERROR: {e}")
         timings["sent_err"] = str(e)
 
     # --- Last resort: at minimum store the seed itself ---
@@ -302,6 +313,7 @@ def sync_tracked_folder():
 
         for idx, (conv_id, entry_id, subject) in enumerate(convs_to_process, 1):
             conv_start = time.perf_counter()
+            print(f"  [{idx:3d}/{len(convs_to_process)}] {subject[:60]}")
             try:
                 is_new = conv_id not in known_convs
                 if not is_new:
