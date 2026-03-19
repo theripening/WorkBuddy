@@ -242,50 +242,24 @@ def sync_tracked_folder():
                 _collect_from_items(tracked.Items.Restrict("[MessageClass] = 'IPM.Note'"))
             _t(f"Folder collection ({len(convs_to_process)} convs so far)", t0)
 
-        # --- Flagged emails (To-Do virtual folder covers all mail folders) ---
+        # --- Flagged emails ---
+        # Search real folders directly — [FlagStatus] works in Restrict on real folders
+        # (unlike virtual folders). Items.Restrict pre-filters so we only create COM
+        # objects for flagged items, keeping iteration fast regardless of folder size.
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
-            todo_folder = namespace.GetDefaultFolder(28)  # 28 = olFolderToDo
             before = len(convs_to_process)
-
-            # GetTable() is fastest but doesn't work on all virtual folder configs —
-            # fall back to Items iteration if it throws
-            try:
-                flag_table = todo_folder.GetTable()
-                flag_table.Columns.RemoveAll()
-                for col in ["EntryID", "ConversationID", "MessageClass", "Subject", "FlagStatus"]:
-                    flag_table.Columns.Add(col)
-                print("  Flag collection: using GetTable()")
-                while not flag_table.EndOfTable:
-                    try:
-                        row = flag_table.GetNextRow()
-                        if row.get("MessageClass", "") != "IPM.Note":
-                            continue
-                        if row.get("FlagStatus") != OL_FLAG_MARKED:
-                            continue
-                        conv_id = row.get("ConversationID", "")
-                        if conv_id and conv_id not in seen_conv_ids:
-                            seen_conv_ids.add(conv_id)
-                            convs_to_process.append((conv_id, row["EntryID"], row.get("Subject") or "(no subject)"))
-                    except Exception:
-                        continue
-
-            except Exception as e:
-                print(f"  Flag collection: GetTable() failed ({e}), using Items iteration")
-                mail_items = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
-                count = mail_items.Count
-                for i in range(1, count + 1):
-                    try:
-                        item = mail_items.Item(i)
-                        if item.FlagStatus != OL_FLAG_MARKED:
-                            continue
-                        conv_id = item.ConversationID
-                        if conv_id and conv_id not in seen_conv_ids:
-                            seen_conv_ids.add(conv_id)
-                            convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
-                    except Exception:
-                        continue
-
+            flag_filter = f"[MessageClass] = 'IPM.Note' AND [FlagStatus] = {OL_FLAG_MARKED}"
+            flag_folders = [
+                namespace.GetDefaultFolder(6),   # Inbox
+                namespace.GetDefaultFolder(5),   # Sent Items
+            ]
+            for folder in flag_folders:
+                try:
+                    _collect_from_items(folder.Items.Restrict(flag_filter))
+                    print(f"  Searched for flags in: {folder.Name}")
+                except Exception as e:
+                    print(f"  Could not search {folder.Name} for flags: {e}")
             _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
 
         print(f"  Conversations to process: {len(convs_to_process)}")
