@@ -243,23 +243,44 @@ def sync_tracked_folder():
             _t(f"Folder collection ({len(convs_to_process)} convs so far)", t0)
 
         # --- Flagged emails ---
-        # Search real folders directly — [FlagStatus] works in Restrict on real folders
-        # (unlike virtual folders). Items.Restrict pre-filters so we only create COM
-        # objects for flagged items, keeping iteration fast regardless of folder size.
+        # Recursively search real folders — [FlagStatus] works in Restrict on real
+        # folders (unlike virtual folders). Pre-filtering means we only create COM
+        # objects for the flagged subset, keeping per-folder iteration fast.
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
             before = len(convs_to_process)
             flag_filter = f"[MessageClass] = 'IPM.Note' AND [FlagStatus] = {OL_FLAG_MARKED}"
-            flag_folders = [
-                namespace.GetDefaultFolder(6),   # Inbox
-                namespace.GetDefaultFolder(5),   # Sent Items
-            ]
-            for folder in flag_folders:
+            visited_folders = set()
+
+            def _search_flagged(folder):
                 try:
-                    _collect_from_items(folder.Items.Restrict(flag_filter))
-                    print(f"  Searched for flags in: {folder.Name}")
+                    fid = folder.EntryID
+                    if fid in visited_folders:
+                        return
+                    visited_folders.add(fid)
+                except Exception:
+                    return
+                try:
+                    flagged = folder.Items.Restrict(flag_filter)
+                    cnt = flagged.Count
+                    if cnt > 0:
+                        print(f"    {folder.Name}: {cnt} flagged item(s)")
+                        _collect_from_items(flagged)
                 except Exception as e:
-                    print(f"  Could not search {folder.Name} for flags: {e}")
+                    print(f"    {folder.Name}: skip ({e})")
+                try:
+                    for subfolder in folder.Folders:
+                        _search_flagged(subfolder)
+                except Exception:
+                    pass
+
+            root_folders = [
+                namespace.GetDefaultFolder(6),   # Inbox (+ all subfolders)
+                namespace.GetDefaultFolder(5),   # Sent Items (+ all subfolders)
+            ]
+            for root in root_folders:
+                _search_flagged(root)
+
             _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
 
         print(f"  Conversations to process: {len(convs_to_process)}")
