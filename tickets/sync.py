@@ -41,12 +41,13 @@ def _extract_preview_str(raw):
         return ""
     if isinstance(raw, str):
         return raw[:300].strip()
+    if isinstance(raw, memoryview):
+        raw = bytes(raw)
     if isinstance(raw, (bytes, bytearray)):
         try:
             return raw.decode("utf-8", errors="replace")[:300].strip()
         except Exception:
             return ""
-    # Unexpected type — log once so we know what we're dealing with
     print(f"    [body_preview] unexpected type {type(raw).__name__!r}: {repr(raw)[:80]}")
     return ""
 
