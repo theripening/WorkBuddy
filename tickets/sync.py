@@ -242,45 +242,32 @@ def sync_tracked_folder():
                 _collect_from_items(tracked.Items.Restrict("[MessageClass] = 'IPM.Note'"))
             _t(f"Folder collection ({len(convs_to_process)} convs so far)", t0)
 
-        # --- Flagged emails ---
-        # Recursively search real folders — [FlagStatus] works in Restrict on real
-        # folders (unlike virtual folders). Pre-filtering means we only create COM
-        # objects for the flagged subset, keeping per-folder iteration fast.
+        # --- Flagged emails via To-Do special folder ---
+        # olFolderToDo aggregates flagged items from all folders — no recursion needed.
+        # GetTable() and FlagStatus in Restrict both fail on this virtual folder, so
+        # we Restrict by MessageClass only (works), then use ConversationID presence
+        # to identify email items (tasks have no ConversationID).
         if track_mode in ("flag", "both"):
             t0 = time.perf_counter()
             before = len(convs_to_process)
-            flag_filter = f"[MessageClass] = 'IPM.Note' AND [FlagStatus] = {OL_FLAG_MARKED}"
-            visited_folders = set()
-
-            def _search_flagged(folder):
-                try:
-                    fid = folder.EntryID
-                    if fid in visited_folders:
-                        return
-                    visited_folders.add(fid)
-                except Exception:
-                    return
-                try:
-                    flagged = folder.Items.Restrict(flag_filter)
-                    cnt = flagged.Count
-                    if cnt > 0:
-                        print(f"    {folder.Name}: {cnt} flagged item(s)")
-                        _collect_from_items(flagged)
-                except Exception as e:
-                    print(f"    {folder.Name}: skip ({e})")
-                try:
-                    for subfolder in folder.Folders:
-                        _search_flagged(subfolder)
-                except Exception:
-                    pass
-
-            root_folders = [
-                namespace.GetDefaultFolder(6),   # Inbox (+ all subfolders)
-                namespace.GetDefaultFolder(5),   # Sent Items (+ all subfolders)
-            ]
-            for root in root_folders:
-                _search_flagged(root)
-
+            try:
+                todo_folder = namespace.GetDefaultFolder(28)  # 28 = olFolderToDo
+                mail_todos = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
+                count = mail_todos.Count
+                print(f"  To-Do folder: {count} mail item(s)")
+                for i in range(1, count + 1):
+                    try:
+                        item = mail_todos.Item(i)
+                        if item.FlagStatus != OL_FLAG_MARKED:  # skip completed flags
+                            continue
+                        conv_id = item.ConversationID
+                        if conv_id and conv_id not in seen_conv_ids:
+                            seen_conv_ids.add(conv_id)
+                            convs_to_process.append((conv_id, item.EntryID, item.Subject or "(no subject)"))
+                    except Exception:
+                        continue
+            except Exception as e:
+                print(f"  To-Do folder error: {e}")
             _t(f"Flag collection (+{len(convs_to_process) - before} convs, {len(convs_to_process)} total)", t0)
 
         print(f"  Conversations to process: {len(convs_to_process)}")
