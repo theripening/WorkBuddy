@@ -391,25 +391,35 @@ def sync_tracked_folder():
                 print(f"  [{idx:3d}/{len(convs_to_process)}] ERROR: {e} | {subject[:50]}")
                 continue
 
+        # Deduplicate across conversations by outlook_id
+        seen = {}
+        for obj in to_bulk_create:
+            if obj.outlook_id not in seen:
+                seen[obj.outlook_id] = obj
+        unique_emails = list(seen.values())
+        dupes = len(to_bulk_create) - len(unique_emails)
+        if dupes:
+            print(f"  Deduped {dupes} cross-conversation duplicates ({len(unique_emails)} unique)")
+
         t0 = time.perf_counter()
         inserted = 0
+        skipped = 0
         errors = 0
-        try:
-            TicketEmail.objects.bulk_create(to_bulk_create, ignore_conflicts=True)
-            inserted = len(to_bulk_create)
-        except Exception as bulk_err:
-            print(f"  bulk_create failed ({bulk_err}) — falling back to one-by-one")
-            for obj in to_bulk_create:
-                try:
-                    obj.save()
-                    inserted += 1
-                except Exception as e:
+        for obj in unique_emails:
+            try:
+                obj.save()
+                inserted += 1
+            except Exception as e:
+                err_str = str(e)
+                if "UNIQUE constraint" in err_str:
+                    skipped += 1
+                else:
                     print(f"    SAVE ERROR outlook_id={obj.outlook_id!r} received_at={obj.received_at!r}: {e}")
                     errors += 1
-        _t(f"save ({inserted} inserted, {errors} errors)", t0)
+        _t(f"save ({inserted} new, {skipped} already existed, {errors} errors of {len(unique_emails)} unique)", t0)
 
         total = time.perf_counter() - sync_start
-        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {inserted} emails saved ===\n")
+        print(f"=== Sync done in {total:.2f}s — {new_tickets} new tickets, {inserted} new emails ===\n")
         return new_tickets, inserted
 
     finally:
