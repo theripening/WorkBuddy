@@ -91,9 +91,9 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
     """
     Walk all items in the conversation and collect unsaved TicketEmail objects.
 
-    Fetches all needed columns in a single GetTable call so no GetItemFromID
-    is required per email — only one GetItemFromID for the seed (needed to call
-    GetConversation), then everything else comes from table rows.
+    Primary path: GetConversation().GetTable() for the seed's folder.
+    Supplementary: Restrict Sent Items by ConversationID to capture sent replies,
+    which GetConversation().GetTable() typically misses.
 
     Updates known_outlook_ids in place.
     Returns (list of unsaved TicketEmail instances, dict of timing info).
@@ -108,72 +108,96 @@ def _sync_conversation(namespace, seed_entry_id, ticket, known_outlook_ids):
         return new_emails, {"error": "GetItemFromID failed"}
     timings["GetItemFromID"] = time.perf_counter() - t0
 
+    conv_id = seed_item.ConversationID
+
+    # --- Primary path: GetConversation().GetTable() ---
     try:
         t0 = time.perf_counter()
         conversation = seed_item.GetConversation()
         timings["GetConversation"] = time.perf_counter() - t0
 
-        if conversation is None:
+        if conversation is not None:
+            t0 = time.perf_counter()
+            table = conversation.GetTable()
+            table.Columns.RemoveAll()
+            for col in _TABLE_COLUMNS:
+                table.Columns.Add(col)
+            table.Columns.Add(PR_BODY_PREVIEW)
+            timings["GetTable+Columns"] = time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            rows = []
+            while not table.EndOfTable:
+                try:
+                    rows.append(table.GetNextRow())
+                except Exception:
+                    continue
+            timings["TableWalk"] = time.perf_counter() - t0
+            timings["row_count"] = len(rows)
+
+            skipped_known = 0
+            skipped_class = {}
+            skipped_err = 0
+            for row in rows:
+                entry_id = row["EntryID"]
+                if entry_id in known_outlook_ids:
+                    skipped_known += 1
+                    continue
+                msg_class = row.get("MessageClass", "") or ""
+                if msg_class != "IPM.Note":
+                    skipped_class[msg_class] = skipped_class.get(msg_class, 0) + 1
+                    continue
+                try:
+                    new_emails.append(_build_email_from_row(ticket, row))
+                    known_outlook_ids.add(entry_id)
+                except Exception as e:
+                    print(f"    SKIP row build error: {e}")
+                    skipped_err += 1
+            timings["skipped_known"] = skipped_known
+            timings["skipped_class"] = skipped_class
+            timings["skipped_err"] = skipped_err
+        else:
             timings["conv_none"] = True
-            if seed_entry_id not in known_outlook_ids:
-                new_emails.append(_build_email_obj(ticket, seed_item))
-                known_outlook_ids.add(seed_entry_id)
-            return new_emails, timings
-
-        t0 = time.perf_counter()
-        table = conversation.GetTable()
-        table.Columns.RemoveAll()
-        for col in _TABLE_COLUMNS:
-            table.Columns.Add(col)
-        table.Columns.Add(PR_BODY_PREVIEW)
-        timings["GetTable+Columns"] = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        rows = []
-        while not table.EndOfTable:
-            try:
-                rows.append(table.GetNextRow())
-            except Exception:
-                continue
-        timings["TableWalk"] = time.perf_counter() - t0
-        timings["row_count"] = len(rows)
-
-        # Early-out: all entry IDs already known — nothing to do
-        if all(row["EntryID"] in known_outlook_ids for row in rows):
-            timings["early_out"] = True
-            return [], timings
-
-        skipped_known = 0
-        skipped_class = {}
-        skipped_err = 0
-        for row in rows:
-            entry_id = row["EntryID"]
-            if entry_id in known_outlook_ids:
-                skipped_known += 1
-                continue
-            msg_class = row.get("MessageClass", "") or ""
-            if msg_class != "IPM.Note":
-                skipped_class[msg_class] = skipped_class.get(msg_class, 0) + 1
-                continue
-            try:
-                new_emails.append(_build_email_from_row(ticket, row))
-                known_outlook_ids.add(entry_id)
-            except Exception as e:
-                print(f"    SKIP row build error: {e}")
-                skipped_err += 1
-                continue
-        timings["skipped_known"] = skipped_known
-        timings["skipped_class"] = skipped_class
-        timings["skipped_err"] = skipped_err
 
     except Exception:
-        # GetConversation not available — fall back to seed item only
-        if seed_entry_id not in known_outlook_ids:
+        timings["conv_err"] = True
+
+    # --- Supplementary: Sent Items search by ConversationID ---
+    # GetConversation().GetTable() only covers the seed's folder — sent replies
+    # live in Sent Items and won't appear there.
+    try:
+        t0 = time.perf_counter()
+        sent_folder = namespace.GetDefaultFolder(5)  # olFolderSentMail
+        sent_items = sent_folder.Items.Restrict(f"[ConversationID] = '{conv_id}'")
+        count = sent_items.Count
+        new_sent = 0
+        for i in range(1, count + 1):
             try:
-                new_emails.append(_build_email_obj(ticket, seed_item))
-                known_outlook_ids.add(seed_entry_id)
+                item = sent_items.Item(i)
+                entry_id = item.EntryID
+                if entry_id in known_outlook_ids:
+                    continue
+                if (item.MessageClass or "") != "IPM.Note":
+                    continue
+                new_emails.append(_build_email_obj(ticket, item))
+                known_outlook_ids.add(entry_id)
+                new_sent += 1
             except Exception:
-                pass
+                continue
+        timings["sent_search"] = time.perf_counter() - t0
+        timings["sent_count"] = count
+        timings["sent_new"] = new_sent
+    except Exception as e:
+        timings["sent_err"] = str(e)
+
+    # Last resort: if nothing at all was captured, store the seed directly
+    if not new_emails and seed_entry_id not in known_outlook_ids:
+        try:
+            new_emails.append(_build_email_obj(ticket, seed_item))
+            known_outlook_ids.add(seed_entry_id)
+            timings["seed_fallback"] = True
+        except Exception:
+            pass
 
     return new_emails, timings
 
@@ -325,6 +349,11 @@ def sync_tracked_folder():
                 if timings.get("skipped_err"):
                     skip_detail.append(f"err={timings['skipped_err']}")
                 skip_str = " skip[" + " ".join(skip_detail) + "]" if skip_detail else ""
+                sent_str = (
+                    f" sent={timings.get('sent_count', '?')}(+{timings.get('sent_new', 0)})"
+                    if "sent_count" in timings else
+                    f" sent_err={timings.get('sent_err', '?')}" if "sent_err" in timings else ""
+                )
                 print(
                     f"  [{idx:3d}/{len(convs_to_process)}] {label} | "
                     f"{elapsed:.3f}s total | "
@@ -332,7 +361,7 @@ def sync_tracked_folder():
                     f"GetConv={timings.get('GetConversation', 0):.3f}s "
                     f"Table={timings.get('GetTable+Columns', 0):.3f}s "
                     f"Walk={timings.get('TableWalk', 0):.3f}s "
-                    f"rows={rows} new={len(new_email_objs)}{skip_str} | "
+                    f"rows={rows} new={len(new_email_objs)}{skip_str}{sent_str} | "
                     f"{subject[:50]}"
                 )
 
