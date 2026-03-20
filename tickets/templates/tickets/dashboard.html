@@ -73,7 +73,8 @@
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'todo' %}active fw-semibold{% endif %}" href="?tab=todo">
             <i class="bi bi-check2-square me-1"></i>To-Do
-            <span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ todo_tickets|length }}</span>
+            <span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ my_todos|length }}</span>
+            {% if team_todos %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">+{{ team_todos|length }} team</span>{% endif %}
         </a>
     </li>
     <li class="nav-item">
@@ -84,7 +85,7 @@
     </li>
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'triage' %}active fw-semibold{% endif %}" href="?tab=triage">
-            <i class="bi bi-inbox me-1"></i>Needs Triage
+            <i class="bi bi-question-circle me-1"></i>Needs Triage
             {% if triage_tickets %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">{{ triage_tickets|length }}</span>{% endif %}
         </a>
     </li>
@@ -107,12 +108,6 @@
         </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link {% if active_tab == 'unclear' %}active fw-semibold{% endif %}" href="?tab=unclear">
-            <i class="bi bi-question-circle me-1"></i>Unclear
-            {% if unclear_tickets %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">{{ unclear_tickets|length }}</span>{% endif %}
-        </a>
-    </li>
-    <li class="nav-item">
         <a class="nav-link {% if active_tab == 'all' %}active fw-semibold{% endif %}" href="?tab=all">
             <i class="bi bi-list me-1"></i>All Tickets
         </a>
@@ -123,8 +118,14 @@
 
 {# ── TO-DO TAB ── #}
 {% if active_tab == "todo" %}
-{% if todo_items %}
-<div class="table-responsive">
+
+{% if not my_todos and not team_todos %}
+<div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No to-dos. You're on top of it.</div>
+{% else %}
+
+{% if my_todos %}
+<h6 class="text-muted fw-semibold small text-uppercase mb-2 mt-1"><i class="bi bi-person me-1"></i>My To-Dos</h6>
+<div class="table-responsive mb-4">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
     <thead class="table-dark">
         <tr>
@@ -133,16 +134,17 @@
             <th style="width:120px">Due</th>
             <th>Ticket</th>
             <th style="width:80px">Priority</th>
-            <th style="width:200px">Thread</th>
+            <th style="width:160px">Assign To</th>
+            <th style="width:180px">Thread</th>
         </tr>
     </thead>
     <tbody>
-    {% for row in todo_items %}{% with item=row.item t=row.item.ticket %}
+    {% for row in my_todos %}{% with item=row.item t=row.item.ticket %}
     <tr class="{% if row.overdue %}table-danger{% endif %} priority-{{ t.priority }}">
         <td class="text-center align-middle">
             <form method="post" action="{% url 'tickets:todo_done' item.pk %}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="{% url 'tickets:list' %}">
+                <input type="hidden" name="next" value="?tab=todo">
                 <button type="submit" class="btn btn-sm btn-outline-success p-1" title="Mark done">
                     <i class="bi bi-check-lg"></i>
                 </button>
@@ -164,13 +166,26 @@
             {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
             {% else %}<span class="text-muted">—</span>{% endif %}
         </td>
+        <td>
+            <form method="post" action="{% url 'tickets:todo_update' item.pk %}" id="todo-asgn-{{ item.pk }}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="?tab=todo">
+                <select name="assignee" class="form-select form-select-sm"
+                        onchange="document.getElementById('todo-asgn-{{ item.pk }}').submit()">
+                    <option value="">— me —</option>
+                    {% for a in assignees %}
+                    <option value="{{ a.pk }}" {% if item.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </td>
         <td class="small">
             {% if item.thread_email %}
             <form method="post" action="{% url 'tickets:open_in_outlook' item.thread_email.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="?tab=todo">
                 <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ item.thread_email.subject|truncatechars:35 }}
+                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ item.thread_email.subject|truncatechars:30 }}
                 </button>
             </form>
             {% else %}—{% endif %}
@@ -180,9 +195,83 @@
     </tbody>
 </table>
 </div>
-{% else %}
-<div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No to-dos. You're on top of it.</div>
 {% endif %}
+
+{% if team_todos %}
+<h6 class="text-muted fw-semibold small text-uppercase mb-2"><i class="bi bi-people me-1"></i>Team To-Dos</h6>
+<div class="table-responsive">
+<table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
+    <thead class="table-secondary">
+        <tr>
+            <th style="width:36px"></th>
+            <th>To-Do</th>
+            <th style="width:120px">Due</th>
+            <th>Ticket</th>
+            <th style="width:80px">Priority</th>
+            <th style="width:160px">Assigned To</th>
+            <th style="width:180px">Thread</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in team_todos %}{% with item=row.item t=row.item.ticket %}
+    <tr class="{% if row.overdue %}table-danger{% endif %} priority-{{ t.priority }}">
+        <td class="text-center align-middle">
+            <form method="post" action="{% url 'tickets:todo_done' item.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="?tab=todo">
+                <button type="submit" class="btn btn-sm btn-outline-success p-1" title="Mark done">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+            </form>
+        </td>
+        <td>{{ item.what }}</td>
+        <td class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
+            {% if item.due_date %}
+                {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
+                {{ item.due_date|date:"M j, Y" }}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td class="subject-cell">
+            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+        </td>
+        <td>
+            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td>
+            <form method="post" action="{% url 'tickets:todo_update' item.pk %}" id="todo-asgn-{{ item.pk }}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="?tab=todo">
+                <select name="assignee" class="form-select form-select-sm"
+                        onchange="document.getElementById('todo-asgn-{{ item.pk }}').submit()">
+                    <option value="">— me —</option>
+                    {% for a in assignees %}
+                    <option value="{{ a.pk }}" {% if item.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </td>
+        <td class="small">
+            {% if item.thread_email %}
+            <form method="post" action="{% url 'tickets:open_in_outlook' item.thread_email.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="?tab=todo">
+                <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ item.thread_email.subject|truncatechars:30 }}
+                </button>
+            </form>
+            {% else %}—{% endif %}
+        </td>
+    </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+
+{% endif %}{# end has todos #}
 
 {# ── STALE TAB ── #}
 {% elif active_tab == "stale" %}
@@ -233,7 +322,7 @@
 
 {# ── NEEDS TRIAGE TAB ── #}
 {% elif active_tab == "triage" %}
-<p class="text-muted small mb-2">Open tickets with no assignee — assign and triage these.</p>
+<p class="text-muted small mb-2">Open tickets with no to-dos and nothing being waited on — what's the next step?</p>
 {% if triage_tickets %}
 <div class="table-responsive">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
@@ -242,7 +331,7 @@
             <th style="width:80px">Priority</th>
             <th>Subject</th>
             <th>Latest From</th>
-            <th style="width:130px">Received</th>
+            <th style="width:130px">Last Email</th>
             <th style="width:110px">Assignee</th>
             <th style="width:80px"></th>
         </tr>
@@ -260,7 +349,7 @@
             <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
         </td>
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
-        <td class="small">{{ item.latest.received_at|date:"M j, Y g:i A"|default:"—" }}</td>
+        <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
         <td class="small">{{ t.assignee.name|default:"Me" }}</td>
         <td><a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Triage</a></td>
     </tr>
@@ -269,7 +358,7 @@
 </table>
 </div>
 {% else %}
-<div class="text-center text-muted py-4"><i class="bi bi-inbox display-4 d-block mb-2"></i>Everything has been triaged.</div>
+<div class="text-center text-muted py-4"><i class="bi bi-question-circle display-4 d-block mb-2"></i>All tickets have a to-do or something being waited on.</div>
 {% endif %}
 
 {# ── RECENT TAB ── #}
@@ -380,8 +469,14 @@
 
 {# ── OPEN TAB ── #}
 {% elif active_tab == "open" %}
-{% if open_tickets %}
-<div class="table-responsive">
+
+{% if not my_open_tickets and not assigned_open_tickets %}
+<div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No open tickets.</div>
+{% else %}
+
+{% if my_open_tickets %}
+<h6 class="text-muted fw-semibold small text-uppercase mb-2 mt-1"><i class="bi bi-person me-1"></i>Mine / Unassigned</h6>
+<div class="table-responsive mb-4">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
     <thead class="table-dark">
         <tr>
@@ -389,12 +484,11 @@
             <th>Subject</th>
             <th>Latest From</th>
             <th style="width:130px">Last Email</th>
-            <th style="width:110px">Assignee</th>
             <th style="width:110px">Status</th>
         </tr>
     </thead>
     <tbody>
-    {% for item in open_tickets %}{% with t=item.ticket %}
+    {% for item in my_open_tickets %}{% with t=item.ticket %}
     <tr class="{% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
@@ -407,7 +501,6 @@
         </td>
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
-        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
         <td>
             {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
             {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
@@ -417,30 +510,25 @@
     </tbody>
 </table>
 </div>
-{% else %}
-<div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No open tickets.</div>
 {% endif %}
 
-{# ── UNCLEAR TAB ── #}
-{% elif active_tab == "unclear" %}
-<p class="text-muted small mb-2">Open tickets with no to-dos and nothing being waited on — what's going on with these?</p>
-{% if unclear_tickets %}
+{% if assigned_open_tickets %}
+<h6 class="text-muted fw-semibold small text-uppercase mb-2"><i class="bi bi-people me-1"></i>Assigned</h6>
 <div class="table-responsive">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
-    <thead class="table-dark">
+    <thead class="table-secondary">
         <tr>
             <th style="width:80px">Priority</th>
             <th>Subject</th>
             <th>Latest From</th>
             <th style="width:130px">Last Email</th>
-            <th style="width:110px">Assignee</th>
+            <th style="width:130px">Assignee</th>
             <th style="width:110px">Status</th>
-            <th style="width:80px"></th>
         </tr>
     </thead>
     <tbody>
-    {% for item in unclear_tickets %}{% with t=item.ticket %}
-    <tr class="priority-{{ t.priority }}">
+    {% for item in assigned_open_tickets %}{% with t=item.ticket %}
+    <tr class="{% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
             {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
@@ -452,20 +540,20 @@
         </td>
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
-        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
+        <td class="small fw-semibold">{{ t.assignee.name }}</td>
         <td>
             {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
             {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
         </td>
-        <td><a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Review</a></td>
     </tr>
     {% endwith %}{% endfor %}
     </tbody>
 </table>
 </div>
-{% else %}
-<div class="text-center text-muted py-4"><i class="bi bi-question-circle display-4 d-block mb-2"></i>All tickets have a to-do or something being waited on.</div>
 {% endif %}
+
+{% endif %}{# end has open tickets #}
+
 
 {# ── ALL TICKETS TAB ── #}
 {% else %}

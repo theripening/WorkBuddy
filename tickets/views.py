@@ -47,6 +47,8 @@ def dashboard(request):
             ),
         })
     todo_items.sort(key=lambda x: x["sort_key"])
+    my_todos = [x for x in todo_items if not x["item"].assignee_id]
+    team_todos = [x for x in todo_items if x["item"].assignee_id]
 
     # --- STALE tab ---
     stale_tickets = []
@@ -63,25 +65,15 @@ def dashboard(request):
     stale_tickets.sort(key=lambda x: x["days_stale"], reverse=True)
     stale_count = len(stale_tickets)
 
-    # --- NEEDS TRIAGE tab: open tickets with no assignee ---
-    triage_tickets = [
-        {"ticket": t, "latest": t.latest_email()}
-        for t in all_tickets.filter(status="open", assignee__isnull=True)
-    ]
-    triage_tickets.sort(key=lambda x: (
-        _priority_sort(x["ticket"].priority),
-        -(x["latest"].received_at.timestamp() if x["latest"] else 0),
-    ))
-
-    # --- UNCLEAR tab: open/in-progress tickets with no undone todos AND no unresolved waiting-on ---
-    unclear_tickets = []
+    # --- NEEDS TRIAGE tab: open/in-progress tickets with no todos and no waiting-on ---
+    triage_tickets = []
     for t in all_tickets.filter(status__in=["open", "in_progress"]):
         if not t.todos.filter(done=False).exists() and not t.waiting_on.filter(resolved=False).exists():
-            unclear_tickets.append({
+            triage_tickets.append({
                 "ticket": t,
                 "latest": t.latest_email(),
             })
-    unclear_tickets.sort(key=lambda x: _priority_sort(x["ticket"].priority))
+    triage_tickets.sort(key=lambda x: _priority_sort(x["ticket"].priority))
 
     # --- RECENT tab ---
     recent_cutoff = today - timedelta(days=stale_days)
@@ -103,10 +95,15 @@ def dashboard(request):
         })
 
     # --- OPEN tab ---
-    open_tickets = [
+    _open_qs = all_tickets.filter(status__in=["open", "in_progress"])
+    my_open_tickets = [
         {"ticket": t, "latest": t.latest_email()}
-        for t in all_tickets.filter(status__in=["open", "in_progress"]).order_by("-updated_at")
+        for t in _open_qs.filter(assignee__isnull=True).order_by("-updated_at")
     ]
+    assigned_open_tickets = sorted(
+        [{"ticket": t, "latest": t.latest_email()} for t in _open_qs.filter(assignee__isnull=False)],
+        key=lambda x: (x["ticket"].assignee.name.lower(), _priority_sort(x["ticket"].priority)),
+    )
 
     # --- ALL tab ---
     all_tab = all_tickets
@@ -139,11 +136,12 @@ def dashboard(request):
         "stale_count": stale_count,
         "waiting_count": waiting_count,
         "open_count": open_count,
-        "todo_items": todo_items,
+        "my_todos": my_todos,
+        "team_todos": team_todos,
         "stale_tickets": stale_tickets,
         "triage_tickets": triage_tickets,
-        "unclear_tickets": unclear_tickets,
-        "open_tickets": open_tickets,
+        "my_open_tickets": my_open_tickets,
+        "assigned_open_tickets": assigned_open_tickets,
         "recent_tickets": recent_tickets,
         "waiting_on_list": waiting_on_list,
         "all_tab_data": all_tab_data,
@@ -263,10 +261,15 @@ def todo_done(request, item_pk):
 @require_POST
 def todo_update(request, item_pk):
     item = get_object_or_404(TodoItem, pk=item_pk)
-    due_raw = request.POST.get("due_date", "").strip()
-    item.due_date = due_raw if due_raw else None
+    if "due_date" in request.POST:
+        due_raw = request.POST.get("due_date", "").strip()
+        item.due_date = due_raw if due_raw else None
+    if "assignee" in request.POST:
+        assignee_raw = request.POST.get("assignee", "").strip()
+        item.assignee_id = int(assignee_raw) if assignee_raw else None
     item.save()
-    return redirect(request.POST.get("next", "tickets:detail"), pk=item.ticket_id)
+    from django.http import HttpResponseRedirect
+    return HttpResponseRedirect(request.POST.get("next", "/"))
 
 
 @require_POST
