@@ -62,10 +62,10 @@ def _row_get(row, key, default=None):
         return default
 
 
-def _build_email_from_row(ticket, row, namespace=None, conv_id=""):
+def _build_email_from_row(ticket, row, namespace=None, conv_id="", fetch_body=True):
     """Build TicketEmail from a conversation table row."""
     body = ""
-    if namespace is not None:
+    if fetch_body and namespace is not None:
         try:
             live = namespace.GetItemFromID(row["EntryID"])
             body = (live.Body or "")[:300].strip()
@@ -85,20 +85,22 @@ def _build_email_from_row(ticket, row, namespace=None, conv_id=""):
     )
 
 
-def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv):
+def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv, known_outlook_ids=None):
     """
-    Return all TicketEmail objects for the conversation containing seed_entry_id.
+    Return only NEW TicketEmail objects for the conversation containing seed_entry_id.
 
-    Fetches fresh every sync — no 'already seen' filtering. Deduplicates
-    in-memory by EntryID; bulk_create(ignore_conflicts=True) handles DB dupes.
+    Walks the full conversation table every sync to discover new emails, but skips
+    GetItemFromID (body fetch) for any EntryID already in known_outlook_ids.
 
     Two sources:
       1. GetConversation().GetTable() — Outlook's built-in conversation view
       2. sent_by_conv dict (pre-loaded once) — catches sent replies that
          GetTable() misses when they live in Sent Items
 
-    Returns (list of TicketEmail instances, dict of timing info).
+    Returns (list of new TicketEmail instances, dict of timing info).
     """
+    if known_outlook_ids is None:
+        known_outlook_ids = set()
     timings = {}
     emails_by_entry_id = {}  # EntryID -> TicketEmail, deduped in memory
 
@@ -142,6 +144,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
             print(f"table_rows={len(rows)}")
 
             skipped_class = {}
+            skipped_known = 0
             for row in rows:
                 msg_class = _row_get(row, "MessageClass") or ""
                 if msg_class != "IPM.Note":
@@ -149,11 +152,16 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
                     continue
                 try:
                     entry_id = row["EntryID"]
-                    if entry_id not in emails_by_entry_id:
-                        emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row, namespace, conv_id)
+                    if entry_id in emails_by_entry_id:
+                        continue
+                    if entry_id in known_outlook_ids:
+                        skipped_known += 1
+                        continue
+                    emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row, namespace, conv_id)
                 except Exception as e:
                     print(f"    SKIP table row: {e}")
             timings["skipped_class"] = skipped_class
+            timings["skipped_known"] = skipped_known
         else:
             print("None")
             timings["conv_none"] = True
@@ -165,9 +173,13 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
     # --- Source 2: pre-loaded Sent Items dict lookup (O(1) per conversation) ---
     sent_rows = sent_by_conv.get(conv_id, [])
     sent_matches = 0
+    sent_skipped_known = 0
     for row_dict in sent_rows:
         entry_id = row_dict.get("EntryID")
         if not entry_id or entry_id in emails_by_entry_id:
+            continue
+        if entry_id in known_outlook_ids:
+            sent_skipped_known += 1
             continue
         try:
             emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row_dict, namespace, conv_id)
@@ -175,7 +187,8 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, sent_by_conv)
         except Exception as e:
             print(f"    SKIP sent row: {e}")
     timings["sent_matches"] = sent_matches
-    print(f"    Sent lookup: {sent_matches} matched from {len(sent_rows)} in conv")
+    timings["sent_skipped_known"] = sent_skipped_known
+    print(f"    Sent lookup: {sent_matches} new, {sent_skipped_known} already known, from {len(sent_rows)} in conv")
 
     # --- Last resort: at minimum store the seed itself ---
     if not emails_by_entry_id and seed_entry_id not in emails_by_entry_id:
@@ -218,12 +231,14 @@ def sync_tracked_folder():
         track_mode = getattr(settings, "TRACK_MODE", "folder")
         print(f"  TRACK_MODE = {track_mode!r}")
 
-        # Pre-load known conversations so we can map conv_id -> ticket
+        # Pre-load known conversations and email IDs from DB
         t0 = time.perf_counter()
         known_convs = {}
-        for conv_id, ticket_id in TicketEmail.objects.values_list("conversation_id", "ticket_id"):
+        known_outlook_ids = set()
+        for outlook_id, conv_id, ticket_id in TicketEmail.objects.values_list("outlook_id", "conversation_id", "ticket_id"):
             known_convs[conv_id] = ticket_id
-        _t(f"DB pre-load ({len(known_convs)} known conversations)", t0)
+            known_outlook_ids.add(outlook_id)
+        _t(f"DB pre-load ({len(known_convs)} known conversations, {len(known_outlook_ids)} known emails)", t0)
 
         # Pre-load Sent Items once into {conv_id: [row_dict, ...]} — avoids
         # scanning 5k+ items per conversation during the main loop.
@@ -349,18 +364,21 @@ def sync_tracked_folder():
                     tickets_cache[ticket.pk] = ticket
                     new_tickets += 1
 
-                email_objs, timings = _collect_conversation_emails(namespace, entry_id, ticket, sent_by_conv)
+                email_objs, timings = _collect_conversation_emails(namespace, entry_id, ticket, sent_by_conv, known_outlook_ids)
                 to_bulk_create.extend(email_objs)
 
                 elapsed = time.perf_counter() - conv_start
                 label = "NEW " if is_new else "sync"
                 table_rows = timings.get("table_rows", "?")
                 sent_matches = timings.get("sent_matches", "?")
+                skipped_known = (timings.get("skipped_known", 0) or 0) + (timings.get("sent_skipped_known", 0) or 0)
                 skip_str = ""
                 if timings.get("skipped_class"):
                     parts = [f"{cls!r}×{n}" for cls, n in timings["skipped_class"].items()]
                     skip_str = " skip[" + " ".join(parts) + "]"
                 extras = []
+                if skipped_known:
+                    extras.append(f"known={skipped_known}")
                 if timings.get("conv_none"):
                     extras.append("conv=None")
                 if timings.get("conv_err"):
@@ -373,7 +391,7 @@ def sync_tracked_folder():
                 print(
                     f"  [{idx:3d}/{len(convs_to_process)}] {label} | "
                     f"{elapsed:.3f}s | "
-                    f"table={table_rows} sent={sent_matches} total={len(email_objs)}"
+                    f"table={table_rows} sent={sent_matches} new={len(email_objs)}"
                     f"{skip_str}{extra_str} | "
                     f"{subject[:50]}"
                 )
