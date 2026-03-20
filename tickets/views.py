@@ -27,25 +27,24 @@ def dashboard(request):
     open_count = Ticket.objects.filter(status__in=["open", "in_progress"]).count()
 
     # --- TO-DO tab: undone TodoItems across all tickets ---
+    # Sort: items with a due date first (ascending), then no-due-date items.
+    # Within same due date (or both no date), sort by ticket priority.
     todo_items_qs = (
         TodoItem.objects
         .filter(done=False)
         .select_related("ticket", "thread_email", "assignee")
-        .order_by("due_date", "created_at")
     )
     todo_items = []
     for item in todo_items_qs:
         overdue = item.due_date and item.due_date < today
-        if item.due_date and item.due_date < today:
-            group = 0
-        elif item.due_date:
-            group = 1
-        else:
-            group = 2
         todo_items.append({
             "item": item,
             "overdue": overdue,
-            "sort_key": (group, item.due_date.toordinal() if item.due_date else 99999, _priority_sort(item.ticket.priority)),
+            "sort_key": (
+                0 if item.due_date else 1,                          # dated items first
+                item.due_date.toordinal() if item.due_date else 0,  # earlier dates first
+                _priority_sort(item.ticket.priority),               # higher priority first
+            ),
         })
     todo_items.sort(key=lambda x: x["sort_key"])
 
