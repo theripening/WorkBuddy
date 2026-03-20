@@ -3,9 +3,10 @@ from django.utils import timezone
 
 
 STATUS_CHOICES = [
-    ("open", "Open"),
+    ("created", "Created"),
+    ("acknowledged", "Acknowledged"),
     ("in_progress", "In Progress"),
-    ("closed", "Closed"),
+    ("completed", "Completed"),
 ]
 
 PRIORITY_CHOICES = [
@@ -33,7 +34,7 @@ class Ticket(models.Model):
     assignee = models.ForeignKey(
         Assignee, null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets"
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="created")
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, blank=True, default="")
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -77,12 +77,7 @@
             {% if team_todos %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">+{{ team_todos|length }} team</span>{% endif %}
         </a>
     </li>
-    <li class="nav-item">
-        <a class="nav-link {% if active_tab == 'stale' %}active fw-semibold{% endif %}" href="?tab=stale">
-            <i class="bi bi-hourglass-split me-1"></i>Stale
-            {% if stale_count %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">{{ stale_count }}</span>{% endif %}
-        </a>
-    </li>
+    
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'triage' %}active fw-semibold{% endif %}" href="?tab=triage">
             <i class="bi bi-question-circle me-1"></i>Needs Triage
@@ -90,9 +85,16 @@
         </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link {% if active_tab == 'recent' %}active fw-semibold{% endif %}" href="?tab=recent">
-            <i class="bi bi-envelope me-1"></i>Recent
-            {% if recent_tickets %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">{{ recent_tickets|length }}</span>{% endif %}
+        <a class="nav-link {% if active_tab == 'open' %}active fw-semibold{% endif %}" href="?tab=open">
+            <i class="bi bi-ticket-perforated me-1"></i>Open
+            <span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ open_count }}</span>
+            {% if team_open_count %}<span class="badge bg-secondary ms-1" style="font-size:0.65rem">+{{ team_open_count }} team</span>{% endif %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'stale' %}active fw-semibold{% endif %}" href="?tab=stale">
+            <i class="bi bi-hourglass-split me-1"></i>Stale
+            {% if stale_count %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">{{ stale_count }}</span>{% endif %}
         </a>
     </li>
     <li class="nav-item">
@@ -101,15 +103,16 @@
             {% if waiting_count %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">{{ waiting_count }}</span>{% endif %}
         </a>
     </li>
-    <li class="nav-item">
-        <a class="nav-link {% if active_tab == 'open' %}active fw-semibold{% endif %}" href="?tab=open">
-            <i class="bi bi-ticket-perforated me-1"></i>Open
-            <span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ open_count }}</span>
-        </a>
-    </li>
+    
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'all' %}active fw-semibold{% endif %}" href="?tab=all">
             <i class="bi bi-list me-1"></i>All Tickets
+        </a>
+    </li>
+        <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'recent' %}active fw-semibold{% endif %}" href="?tab=recent">
+            <i class="bi bi-envelope me-1"></i>Recent
+            {% if recent_tickets %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">{{ recent_tickets|length }}</span>{% endif %}
         </a>
     </li>
 </ul>
@@ -308,7 +311,8 @@
         </td>
         <td class="small">{{ t.assignee.name|default:"Me" }}</td>
         <td>
-            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% if t.status == "created" %}<span class="badge bg-primary">Created</span>
+            {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark">Acknowledged</span>
             {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
         </td>
     </tr>
@@ -326,14 +330,6 @@
     <input type="hidden" name="tab" value="triage">
     <div class="col-auto">
         <input type="text" name="q" class="form-control form-control-sm" placeholder="Search" value="{{ search }}">
-    </div>
-    <div class="col-auto">
-        <select name="assignee" class="form-select form-select-sm">
-            <option value="">All Assignees</option>
-            {% for a in assignees %}
-            <option value="{{ a.pk }}" {% if current_assignee == a.pk|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>
-            {% endfor %}
-        </select>
     </div>
     <div class="col-auto">
         <select name="priority" class="form-select form-select-sm">
@@ -436,9 +432,10 @@
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y g:i A"|default:"—" }}</td>
         <td>
-            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% if t.status == "created" %}<span class="badge bg-primary">Created</span>
+            {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark">Acknowledged</span>
             {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>
-            {% else %}<span class="badge bg-secondary">Closed</span>{% endif %}
+            {% else %}<span class="badge bg-secondary">Completed</span>{% endif %}
         </td>
     </tr>
     {% endwith %}{% endfor %}
@@ -547,7 +544,8 @@
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
         <td>
-            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% if t.status == "created" %}<span class="badge bg-primary">Created</span>
+            {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark">Acknowledged</span>
             {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
         </td>
     </tr>
@@ -587,7 +585,8 @@
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
         <td class="small fw-semibold">{{ t.assignee.name }}</td>
         <td>
-            {% if t.status == "open" %}<span class="badge bg-primary">Open</span>
+            {% if t.status == "created" %}<span class="badge bg-primary">Created</span>
+            {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark">Acknowledged</span>
             {% elif t.status == "in_progress" %}<span class="badge bg-warning text-dark">In Progress</span>{% endif %}
         </td>
     </tr>
@@ -659,7 +658,7 @@
     </thead>
     <tbody>
     {% for item in all_tab_data %}{% with t=item.ticket %}
-    <tr class="{% if t.status == 'closed' %}table-secondary{% elif t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
+    <tr class="{% if t.status == 'completed' %}table-secondary{% elif t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
             {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>

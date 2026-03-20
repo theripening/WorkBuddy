@@ -24,7 +24,7 @@ def dashboard(request):
     # --- Stat card counts ---
     overdue_count = TodoItem.objects.filter(done=False, due_date__lt=today).count()
     waiting_count = WaitingOn.objects.filter(resolved=False).count()
-    open_count = Ticket.objects.filter(status__in=["open", "in_progress"]).count()
+    
 
     # --- TO-DO tab: undone TodoItems across all tickets ---
     # Sort: items with a due date first (ascending), then no-due-date items.
@@ -52,7 +52,7 @@ def dashboard(request):
 
     # --- STALE tab ---
     stale_tickets = []
-    for t in all_tickets.filter(status__in=["open", "in_progress"]):
+    for t in all_tickets.filter(status__in=["created", "acknowledged", "in_progress"]):
         last_activity = t.last_activity_date()
         if last_activity <= stale_cutoff:
             days = (today - last_activity).days
@@ -71,23 +71,15 @@ def dashboard(request):
     priority_filter = request.GET.get("priority", "")
     search = request.GET.get("q", "")
 
-    # --- NEEDS TRIAGE tab: open/in-progress tickets with no todos and no waiting-on ---
-    triage_qs = all_tickets.filter(status__in=["open", "in_progress"])
+    # --- NEEDS TRIAGE tab: created tickets with no assignee ---
+    triage_qs = all_tickets.filter(status="created", assignee__isnull=True)
     if search:
         triage_qs = triage_qs.filter(
             Q(subject__icontains=search) | Q(emails__sender__icontains=search)
         ).distinct()
     if priority_filter:
         triage_qs = triage_qs.filter(priority=priority_filter)
-    if assignee_filter:
-        triage_qs = triage_qs.filter(assignee_id=assignee_filter)
-    triage_tickets = []
-    for t in triage_qs:
-        if not t.todos.filter(done=False).exists() and not t.waiting_on.filter(resolved=False).exists():
-            triage_tickets.append({
-                "ticket": t,
-                "latest": t.latest_email(),
-            })
+    triage_tickets = [{"ticket": t, "latest": t.latest_email()} for t in triage_qs]
     triage_tickets.sort(key=lambda x: _priority_sort(x["ticket"].priority))
 
     # --- RECENT tab ---
@@ -110,7 +102,7 @@ def dashboard(request):
         })
 
     # --- OPEN tab ---
-    _open_qs = all_tickets.filter(status__in=["open", "in_progress"])
+    _open_qs = all_tickets.filter(status__in=["acknowledged", "in_progress"])
     my_open_tickets = [
         {"ticket": t, "latest": t.latest_email()}
         for t in _open_qs.filter(assignee__isnull=True).order_by("-updated_at")
@@ -119,6 +111,11 @@ def dashboard(request):
         [{"ticket": t, "latest": t.latest_email()} for t in _open_qs.filter(assignee__isnull=False)],
         key=lambda x: (x["ticket"].assignee.name.lower(), _priority_sort(x["ticket"].priority)),
     )
+
+    open_count = len(my_open_tickets)
+    team_open_count = len(assigned_open_tickets)
+    
+
 
     # --- ALL tab ---
     all_tab = all_tickets
@@ -148,6 +145,7 @@ def dashboard(request):
         "stale_count": stale_count,
         "waiting_count": waiting_count,
         "open_count": open_count,
+        "team_open_count": team_open_count,
         "my_todos": my_todos,
         "team_todos": team_todos,
         "stale_tickets": stale_tickets,

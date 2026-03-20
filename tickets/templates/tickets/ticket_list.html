@@ -91,7 +91,7 @@
             {% with ticket=item.ticket latest=item.latest %}
             {% if ticket.todo and ticket.due_date and ticket.due_date < today %}
             <tr class="table-danger">
-            {% elif ticket.status == 'closed' %}
+            {% elif ticket.status == 'completed' %}
             <tr class="table-secondary">
             {% elif ticket.status == 'in_progress' %}
             <tr class="table-warning bg-opacity-25">
