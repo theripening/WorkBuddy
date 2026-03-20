@@ -322,17 +322,43 @@
 
 {# ── NEEDS TRIAGE TAB ── #}
 {% elif active_tab == "triage" %}
-<p class="text-muted small mb-2">Open tickets with no to-dos and nothing being waited on — what's the next step?</p>
+<form method="get" class="row g-2 mb-3 align-items-center">
+    <input type="hidden" name="tab" value="triage">
+    <div class="col-auto">
+        <input type="text" name="q" class="form-control form-control-sm" placeholder="Search" value="{{ search }}">
+    </div>
+    <div class="col-auto">
+        <select name="assignee" class="form-select form-select-sm">
+            <option value="">All Assignees</option>
+            {% for a in assignees %}
+            <option value="{{ a.pk }}" {% if current_assignee == a.pk|stringformat:"s" %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <select name="priority" class="form-select form-select-sm">
+            <option value="">All Priorities</option>
+            {% for val, label in priority_choices %}
+            <option value="{{ val }}" {% if current_priority == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="?tab=triage" class="btn btn-outline-secondary btn-sm">Clear</a>
+    </div>
+</form>
 {% if triage_tickets %}
 <div class="table-responsive">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
     <thead class="table-dark">
         <tr>
-            <th style="width:80px">Priority</th>
+            <th style="width:100px">Priority</th>
             <th>Subject</th>
             <th>Latest From</th>
             <th style="width:130px">Last Email</th>
-            <th style="width:110px">Assignee</th>
+            <th style="width:140px">Assignee</th>
+            <th style="width:110px">Status</th>
             <th style="width:80px"></th>
         </tr>
     </thead>
@@ -340,17 +366,36 @@
     {% for item in triage_tickets %}{% with t=item.ticket %}
     <tr class="priority-{{ t.priority }}">
         <td>
-            {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
-            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
-            {% elif t.priority == "low" %}<span class="badge bg-secondary">Low</span>
-            {% else %}<span class="text-muted">—</span>{% endif %}
+            <select name="priority" form="upd-{{ t.pk }}" class="form-select form-select-sm"
+                    onchange="document.getElementById('upd-{{ t.pk }}').submit()">
+                <option value="">— none —</option>
+                {% for val, label in priority_choices %}
+                <option value="{{ val }}" {% if t.priority == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
         </td>
         <td class="subject-cell">
             <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
         </td>
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
-        <td class="small">{{ t.assignee.name|default:"Me" }}</td>
+        <td>
+            <select name="assignee" form="upd-{{ t.pk }}" class="form-select form-select-sm"
+                    onchange="document.getElementById('upd-{{ t.pk }}').submit()">
+                <option value="" {% if not t.assignee %}selected{% endif %}>Me</option>
+                {% for a in assignees %}
+                <option value="{{ a.pk }}" {% if t.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
+                {% endfor %}
+            </select>
+        </td>
+        <td>
+            <select name="status" form="upd-{{ t.pk }}" class="form-select form-select-sm"
+                    onchange="document.getElementById('upd-{{ t.pk }}').submit()">
+                {% for val, label in status_choices %}
+                <option value="{{ val }}" {% if t.status == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </td>
         <td><a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Triage</a></td>
     </tr>
     {% endwith %}{% endfor %}

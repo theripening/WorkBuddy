@@ -65,9 +65,24 @@ def dashboard(request):
     stale_tickets.sort(key=lambda x: x["days_stale"], reverse=True)
     stale_count = len(stale_tickets)
 
+    # Shared filter params — used by both Triage and All tabs
+    status_filter = request.GET.get("status", "")
+    assignee_filter = request.GET.get("assignee", "")
+    priority_filter = request.GET.get("priority", "")
+    search = request.GET.get("q", "")
+
     # --- NEEDS TRIAGE tab: open/in-progress tickets with no todos and no waiting-on ---
+    triage_qs = all_tickets.filter(status__in=["open", "in_progress"])
+    if search:
+        triage_qs = triage_qs.filter(
+            Q(subject__icontains=search) | Q(emails__sender__icontains=search)
+        ).distinct()
+    if priority_filter:
+        triage_qs = triage_qs.filter(priority=priority_filter)
+    if assignee_filter:
+        triage_qs = triage_qs.filter(assignee_id=assignee_filter)
     triage_tickets = []
-    for t in all_tickets.filter(status__in=["open", "in_progress"]):
+    for t in triage_qs:
         if not t.todos.filter(done=False).exists() and not t.waiting_on.filter(resolved=False).exists():
             triage_tickets.append({
                 "ticket": t,
@@ -107,10 +122,6 @@ def dashboard(request):
 
     # --- ALL tab ---
     all_tab = all_tickets
-    status_filter = request.GET.get("status", "")
-    assignee_filter = request.GET.get("assignee", "")
-    priority_filter = request.GET.get("priority", "")
-    search = request.GET.get("q", "")
     if status_filter:
         all_tab = all_tab.filter(status=status_filter)
     if assignee_filter:
@@ -123,7 +134,8 @@ def dashboard(request):
         ).distinct()
     all_tab_data = [{"ticket": t, "latest": t.latest_email()} for t in all_tab]
 
-    form_tickets = Ticket.objects.filter(pk__in=[x["ticket"].pk for x in all_tab_data]).select_related("assignee")
+    form_pks = {x["ticket"].pk for x in all_tab_data} | {x["ticket"].pk for x in triage_tickets}
+    form_tickets = Ticket.objects.filter(pk__in=form_pks).select_related("assignee")
 
     active_tab = request.GET.get("tab", "todo")
     assignees = Assignee.objects.all()
