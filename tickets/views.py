@@ -108,11 +108,11 @@ def dashboard(request):
     _open_qs = all_tickets.filter(status__in=["acknowledged", "in_progress"])
     my_open_tickets = [
         {"ticket": t, "latest": t.latest_email()}
-        for t in _open_qs.filter(assignee__isnull=True).order_by("-updated_at")
+        for t in _open_qs.filter(assignee__isnull=True).order_by("subject")
     ]
     assigned_open_tickets = sorted(
         [{"ticket": t, "latest": t.latest_email()} for t in _open_qs.filter(assignee__isnull=False)],
-        key=lambda x: (x["ticket"].assignee.name.lower(), _priority_sort(x["ticket"].priority)),
+        key=lambda x: (x["ticket"].assignee.name.lower(), x["ticket"].subject.lower() if x["ticket"].subject else ""),
     )
 
     open_count = len(my_open_tickets)
