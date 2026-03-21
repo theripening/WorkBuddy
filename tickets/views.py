@@ -209,14 +209,21 @@ def ticket_create(request):
 
 @require_POST
 def ticket_update(request, pk):
+    from .sync import unflag_ticket_emails
     ticket = get_object_or_404(Ticket, pk=pk)
     ticket.subject = request.POST.get("subject", ticket.subject) or ticket.subject
     assignee_raw = request.POST.get("assignee", "")
     ticket.assignee_id = int(assignee_raw) if assignee_raw else None
+    prev_status = ticket.status
     ticket.status = request.POST.get("status", ticket.status)
     ticket.priority = request.POST.get("priority", ticket.priority)
     ticket.notes = request.POST.get("notes", ticket.notes)
     ticket.save()
+    if ticket.status == "completed" and prev_status != "completed":
+        try:
+            unflag_ticket_emails(ticket)
+        except Exception as e:
+            messages.warning(request, f"Ticket saved but could not unflag Outlook emails: {e}")
     return redirect(request.POST.get("next", "tickets:list"))
 
 

@@ -309,6 +309,11 @@ def sync_tracked_folder():
                     if ticket_id not in tickets_cache:
                         tickets_cache[ticket_id] = Ticket.objects.get(pk=ticket_id)
                     ticket = tickets_cache[ticket_id]
+                    # Re-open completed ticket when its seed email is re-flagged
+                    if ticket.status == "completed":
+                        ticket.status = "created"
+                        ticket.save(update_fields=["status"])
+                        logger.info("Re-opened completed ticket %d: %s", ticket.pk, (subject or "")[:50])
                 else:
                     ticket = Ticket.objects.create(subject=subject)
                     known_convs[conv_id] = ticket.pk
@@ -316,6 +321,16 @@ def sync_tracked_folder():
                     new_tickets += 1
 
                 email_objs, timings = _collect_conversation_emails(namespace, entry_id, ticket, known_outlook_ids)
+
+                # Mark the seed email so we can unflag it later when ticket completes
+                for obj in email_objs:
+                    if obj.outlook_id == entry_id:
+                        obj.is_seed = True
+                        break
+                else:
+                    # seed was already known (skipped) — ensure DB record is marked
+                    TicketEmail.objects.filter(outlook_id=entry_id).update(is_seed=True)
+
                 to_bulk_create.extend(email_objs)
 
                 elapsed = time.perf_counter() - conv_start
@@ -436,5 +451,44 @@ def sync_ticket_conversations(ticket):
         logger.info("Ticket %d sync done: %d new email(s)", ticket.pk, inserted)
         return inserted
 
+    finally:
+        pythoncom.CoUninitialize()
+
+
+OL_FLAG_COMPLETE = 1
+OL_FLAG_NOT_FLAGGED = 0
+
+
+def unflag_ticket_emails(ticket):
+    """
+    Clear the Outlook follow-up flag on all seed emails for the given ticket.
+    Called when a ticket is marked as completed.
+    Returns the number of emails successfully unflagged.
+    """
+    seed_ids = list(ticket.emails.filter(is_seed=True).values_list("outlook_id", flat=True))
+    if not seed_ids:
+        logger.info("Ticket %d: no seed emails to unflag", ticket.pk)
+        return 0
+
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        namespace = outlook.GetNamespace("MAPI")
+        cleared = 0
+        for outlook_id in seed_ids:
+            try:
+                item = namespace.GetItemFromID(outlook_id)
+                if item.FlagStatus != OL_FLAG_NOT_FLAGGED:
+                    item.FlagStatus = OL_FLAG_NOT_FLAGGED
+                    item.Save()
+                    cleared += 1
+                    logger.debug("Unflagged outlook_id=%s", outlook_id)
+            except Exception as e:
+                logger.warning("Could not unflag outlook_id=%s: %s", outlook_id, e)
+        logger.info("Ticket %d: unflagged %d/%d seed email(s)", ticket.pk, cleared, len(seed_ids))
+        return cleared
     finally:
         pythoncom.CoUninitialize()

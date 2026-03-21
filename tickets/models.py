@@ -64,6 +64,7 @@ class TicketEmail(models.Model):
     sender = models.CharField(max_length=255)
     received_at = models.DateTimeField()
     body_preview = models.TextField(blank=True)
+    is_seed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
