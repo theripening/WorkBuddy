@@ -82,6 +82,10 @@ class TodoItem(models.Model):
         TicketEmail, null=True, blank=True, on_delete=models.SET_NULL,
         related_name="todos", help_text="Latest email of the linked thread"
     )
+    waiting_on = models.ForeignKey(
+        "WaitingOn", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="dependent_todos", help_text="Blocked until this waiting-on item is resolved"
+    )
     what = models.CharField(max_length=500)
     due_date = models.DateField(null=True, blank=True)
     done = models.BooleanField(default=False)

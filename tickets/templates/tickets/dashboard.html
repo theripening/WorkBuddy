@@ -147,13 +147,13 @@
         <td class="text-center align-middle">
             <form method="post" action="{% url 'tickets:todo_done' item.pk %}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=todo">
+                <input type="hidden" name="next" value="/?tab=todo">
                 <button type="submit" class="btn btn-sm btn-outline-success p-1" title="Mark done">
                     <i class="bi bi-check-lg"></i>
                 </button>
             </form>
         </td>
-        <td>{{ item.what }}</td>
+        <td>{{ item.what }}{% if row.blocked %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem" title="Waiting: {{ item.waiting_on.what }}">⏳ blocked</span>{% endif %}</td>
         <td class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
             {% if item.due_date %}
                 {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
@@ -172,7 +172,7 @@
         <td>
             <form method="post" action="{% url 'tickets:todo_update' item.pk %}" id="todo-asgn-{{ item.pk }}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=todo">
+                <input type="hidden" name="next" value="/?tab=todo">
                 <select name="assignee" class="form-select form-select-sm"
                         onchange="document.getElementById('todo-asgn-{{ item.pk }}').submit()">
                     <option value="">— me —</option>
@@ -186,7 +186,7 @@
             {% if item.thread_email %}
             <form method="post" action="{% url 'tickets:open_in_outlook' item.thread_email.pk %}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=todo">
+                <input type="hidden" name="next" value="/?tab=todo">
                 <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
                     <i class="bi bi-box-arrow-up-right me-1"></i>{{ item.thread_email.subject|truncatechars:30 }}
                 </button>
@@ -221,13 +221,13 @@
         <td class="text-center align-middle">
             <form method="post" action="{% url 'tickets:todo_done' item.pk %}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=todo">
+                <input type="hidden" name="next" value="/?tab=todo">
                 <button type="submit" class="btn btn-sm btn-outline-success p-1" title="Mark done">
                     <i class="bi bi-check-lg"></i>
                 </button>
             </form>
         </td>
-        <td>{{ item.what }}</td>
+        <td>{{ item.what }}{% if row.blocked %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem" title="Waiting: {{ item.waiting_on.what }}">⏳ blocked</span>{% endif %}</td>
         <td class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
             {% if item.due_date %}
                 {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
@@ -246,7 +246,7 @@
         <td>
             <form method="post" action="{% url 'tickets:todo_update' item.pk %}" id="todo-asgn-{{ item.pk }}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=todo">
+                <input type="hidden" name="next" value="/?tab=todo">
                 <select name="assignee" class="form-select form-select-sm"
                         onchange="document.getElementById('todo-asgn-{{ item.pk }}').submit()">
                     <option value="">— me —</option>
@@ -260,7 +260,7 @@
             {% if item.thread_email %}
             <form method="post" action="{% url 'tickets:open_in_outlook' item.thread_email.pk %}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=todo">
+                <input type="hidden" name="next" value="/?tab=todo">
                 <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
                     <i class="bi bi-box-arrow-up-right me-1"></i>{{ item.thread_email.subject|truncatechars:30 }}
                 </button>
@@ -476,7 +476,7 @@
             {% if w.thread_email %}
             <form method="post" action="{% url 'tickets:open_in_outlook' w.thread_email.pk %}">
                 {% csrf_token %}
-                <input type="hidden" name="next" value="?tab=waiting">
+                <input type="hidden" name="next" value="/?tab=waiting">
                 <button type="submit" class="btn btn-link btn-sm p-0 text-start text-decoration-none text-muted">
                     <i class="bi bi-box-arrow-up-right me-1"></i>{{ w.thread_email.subject|truncatechars:40 }}
                 </button>

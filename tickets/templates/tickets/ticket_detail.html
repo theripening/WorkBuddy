@@ -246,6 +246,16 @@
                     <div class="col-auto">
                         <input type="date" name="due_date" class="form-control form-control-sm" style="width:150px" title="Due date">
                     </div>
+                    {% if unresolved_waiting_on %}
+                    <div class="col-auto">
+                        <select name="waiting_on" class="form-select form-select-sm" style="width:180px" title="Blocked until...">
+                            <option value="">No dependency</option>
+                            {% for w in unresolved_waiting_on %}
+                            <option value="{{ w.pk }}">⏳ {{ w.what|truncatechars:30 }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
                     <div class="col-auto">
                         <button type="submit" class="btn btn-primary btn-sm">Save</button>
                     </div>
@@ -263,6 +273,9 @@
                     {% if todo.assignee %}
                     <span class="badge bg-primary ms-1" style="font-size:0.7rem">{{ todo.assignee.name }}</span>
                     {% endif %}
+                    {% if todo.waiting_on and not todo.waiting_on.resolved %}
+                    <span class="badge bg-warning text-dark ms-1" style="font-size:0.7rem" title="Blocked until: {{ todo.waiting_on.what }}">⏳ Waiting: {{ todo.waiting_on.what|truncatechars:25 }}</span>
+                    {% endif %}
                     {% if todo.thread_email %}
                     <span class="badge bg-light text-muted border ms-1" style="font-size:0.7rem">{{ todo.thread_email.subject|truncatechars:30 }}</span>
                     {% endif %}
@@ -272,16 +285,10 @@
                 </div>
                 {% if not todo.done %}
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <form method="post" action="{% url 'tickets:todo_update' todo.pk %}" class="d-flex align-items-center gap-1">
-                        {% csrf_token %}
-                        <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
-                        <input type="date" name="due_date"
-                               value="{{ todo.due_date|date:'Y-m-d' }}"
-                               class="form-control form-control-sm {% if todo.due_date and todo.due_date < today %}border-danger text-danger{% endif %}"
-                               style="width:145px"
-                               onchange="this.form.submit()"
-                               title="Due date">
-                    </form>
+                    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse"
+                            data-bs-target="#edit-todo-{{ todo.pk }}" title="Edit">
+                        <i class="bi bi-pencil"></i>
+                    </button>
                     {% with notify_assignee=todo.assignee|default:ticket.assignee %}
                     {% if notify_assignee and notify_assignee.email %}
                     <form method="post" action="{% url 'tickets:notify_todo' todo.pk %}">
@@ -298,6 +305,44 @@
                         <button type="submit" class="btn btn-sm btn-outline-success text-nowrap">
                             <i class="bi bi-check-lg me-1"></i>Done
                         </button>
+                    </form>
+                </div>
+                <div class="collapse mt-2" id="edit-todo-{{ todo.pk }}">
+                    <form method="post" action="{% url 'tickets:todo_update' todo.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                        <div class="row g-2 align-items-end">
+                            <div class="col">
+                                <input type="text" name="what" value="{{ todo.what }}"
+                                       class="form-control form-control-sm" required placeholder="What needs to be done?">
+                            </div>
+                            <div class="col-auto">
+                                <select name="assignee" class="form-select form-select-sm" style="width:130px">
+                                    <option value="">Me</option>
+                                    {% for a in assignees %}
+                                    <option value="{{ a.pk }}" {% if todo.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <input type="date" name="due_date" value="{{ todo.due_date|date:'Y-m-d' }}"
+                                       class="form-control form-control-sm" style="width:150px">
+                            </div>
+                            <div class="col-auto">
+                                <select name="waiting_on" class="form-select form-select-sm" style="width:180px" title="Blocked until...">
+                                    <option value="">No dependency</option>
+                                    {% for w in unresolved_waiting_on %}
+                                    <option value="{{ w.pk }}" {% if todo.waiting_on_id == w.pk %}selected{% endif %}>⏳ {{ w.what|truncatechars:30 }}</option>
+                                    {% endfor %}
+                                    {% if todo.waiting_on and todo.waiting_on.resolved %}
+                                    <option value="{{ todo.waiting_on.pk }}" selected>✓ {{ todo.waiting_on.what|truncatechars:30 }} (resolved)</option>
+                                    {% endif %}
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                            </div>
+                        </div>
                     </form>
                 </div>
                 {% endif %}
@@ -365,12 +410,40 @@
                         &nbsp;·&nbsp; {{ w.days_waiting }}d waiting
                     </div>
                 </div>
-                <form method="post" action="{% url 'tickets:waiting_on_resolve' w.pk %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
-                    <button type="submit" class="btn btn-sm btn-outline-success text-nowrap">
-                        <i class="bi bi-check-lg me-1"></i>Got it
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse"
+                            data-bs-target="#edit-waiting-{{ w.pk }}" title="Edit">
+                        <i class="bi bi-pencil"></i>
                     </button>
+                    <form method="post" action="{% url 'tickets:waiting_on_resolve' w.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                        <button type="submit" class="btn btn-sm btn-outline-success text-nowrap">
+                            <i class="bi bi-check-lg me-1"></i>Got it
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <div class="collapse mt-2" id="edit-waiting-{{ w.pk }}">
+                <form method="post" action="{% url 'tickets:waiting_on_update' w.pk %}">
+                    {% csrf_token %}
+                    <div class="row g-2 align-items-end">
+                        <div class="col">
+                            <input type="text" name="what" value="{{ w.what }}"
+                                   class="form-control form-control-sm" required placeholder="What are you waiting for?">
+                        </div>
+                        <div class="col-auto">
+                            <input type="text" name="from_who" value="{{ w.from_who }}"
+                                   class="form-control form-control-sm" placeholder="From who?" style="width:140px">
+                        </div>
+                        <div class="col-auto">
+                            <input type="date" name="expected_date" value="{{ w.expected_date|date:'Y-m-d' }}"
+                                   class="form-control form-control-sm" style="width:150px">
+                        </div>
+                        <div class="col-auto">
+                            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                        </div>
+                    </div>
                 </form>
             </div>
         </li>

@@ -15,6 +15,7 @@ urlpatterns = [
     path("todo/<int:item_pk>/update/", views.todo_update, name="todo_update"),
     path("<int:pk>/waiting-on/add/", views.waiting_on_add, name="waiting_on_add"),
     path("waiting-on/<int:item_pk>/resolve/", views.waiting_on_resolve, name="waiting_on_resolve"),
+    path("waiting-on/<int:item_pk>/update/", views.waiting_on_update, name="waiting_on_update"),
     path("email/<int:email_pk>/open/", views.open_in_outlook, name="open_in_outlook"),
     path("sync/", views.sync_outlook, name="sync"),
     path("<int:pk>/notify/ticket/", views.notify_ticket, name="notify_ticket"),

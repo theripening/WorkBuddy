@@ -32,15 +32,18 @@ def dashboard(request):
     todo_items_qs = (
         TodoItem.objects
         .filter(done=False)
-        .select_related("ticket", "thread_email", "assignee")
+        .select_related("ticket", "thread_email", "assignee", "waiting_on")
     )
     todo_items = []
     for item in todo_items_qs:
         overdue = item.due_date and item.due_date < today
+        blocked = bool(item.waiting_on_id and not item.waiting_on.resolved)
         todo_items.append({
             "item": item,
             "overdue": overdue,
+            "blocked": blocked,
             "sort_key": (
+                1 if blocked else 0,                                # blocked items last
                 0 if item.due_date else 1,                          # dated items first
                 item.due_date.toordinal() if item.due_date else 0,  # earlier dates first
                 _priority_sort(item.ticket.priority),               # higher priority first
@@ -177,7 +180,8 @@ def ticket_detail(request, pk):
 
     other_tickets = Ticket.objects.exclude(pk=pk).order_by("subject")
     waiting_on = ticket.waiting_on.all()
-    todos = ticket.todos.select_related("assignee", "thread_email").all()
+    unresolved_waiting_on = ticket.waiting_on.filter(resolved=False)
+    todos = ticket.todos.select_related("assignee", "thread_email", "waiting_on").all()
     assignees = Assignee.objects.all()
 
     return render(request, "tickets/ticket_detail.html", {
@@ -185,6 +189,7 @@ def ticket_detail(request, pk):
         "threads": sorted_threads,
         "other_tickets": other_tickets,
         "waiting_on": waiting_on,
+        "unresolved_waiting_on": unresolved_waiting_on,
         "todos": todos,
         "assignees": assignees,
         "status_choices": STATUS_CHOICES,
@@ -249,12 +254,14 @@ def todo_add(request, pk):
         assignee_raw = request.POST.get("assignee", "").strip()
         email_pk = request.POST.get("thread_email_pk", "").strip()
         thread_email = TicketEmail.objects.filter(pk=email_pk).first() if email_pk else None
+        waiting_on_raw = request.POST.get("waiting_on", "").strip()
         TodoItem.objects.create(
             ticket=ticket,
             thread_email=thread_email,
             assignee_id=int(assignee_raw) if assignee_raw else None,
             what=what,
             due_date=due_raw if due_raw else None,
+            waiting_on_id=int(waiting_on_raw) if waiting_on_raw else None,
         )
     return redirect("tickets:detail", pk=pk)
 
@@ -265,18 +272,27 @@ def todo_done(request, item_pk):
     item.done = True
     item.done_at = timezone.now()
     item.save()
-    return redirect(request.POST.get("next", "tickets:detail"), pk=item.ticket_id)
+    from django.http import HttpResponseRedirect
+    next_url = request.POST.get("next") or f"/tickets/{item.ticket_id}/"
+    return HttpResponseRedirect(next_url)
 
 
 @require_POST
 def todo_update(request, item_pk):
     item = get_object_or_404(TodoItem, pk=item_pk)
+    if "what" in request.POST:
+        what = request.POST.get("what", "").strip()
+        if what:
+            item.what = what
     if "due_date" in request.POST:
         due_raw = request.POST.get("due_date", "").strip()
         item.due_date = due_raw if due_raw else None
     if "assignee" in request.POST:
         assignee_raw = request.POST.get("assignee", "").strip()
         item.assignee_id = int(assignee_raw) if assignee_raw else None
+    if "waiting_on" in request.POST:
+        waiting_on_raw = request.POST.get("waiting_on", "").strip()
+        item.waiting_on_id = int(waiting_on_raw) if waiting_on_raw else None
     item.save()
     from django.http import HttpResponseRedirect
     return HttpResponseRedirect(request.POST.get("next", "/"))
@@ -306,6 +322,19 @@ def waiting_on_resolve(request, item_pk):
     item = get_object_or_404(WaitingOn, pk=item_pk)
     item.resolved = True
     item.resolved_at = timezone.now().date()
+    item.save()
+    return redirect("tickets:detail", pk=item.ticket_id)
+
+
+@require_POST
+def waiting_on_update(request, item_pk):
+    item = get_object_or_404(WaitingOn, pk=item_pk)
+    what = request.POST.get("what", "").strip()
+    if what:
+        item.what = what
+    item.from_who = request.POST.get("from_who", "").strip()
+    expected_raw = request.POST.get("expected_date", "").strip()
+    item.expected_date = expected_raw if expected_raw else None
     item.save()
     return redirect("tickets:detail", pk=item.ticket_id)
 
