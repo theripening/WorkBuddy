@@ -56,6 +56,12 @@
             <option value="{{ val }}" {% if ticket.status == val %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
+        <form method="post" action="{% url 'tickets:sync_ticket' ticket.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Re-sync this ticket's conversations from Outlook">
+                <i class="bi bi-arrow-clockwise me-1"></i>Sync
+            </button>
+        </form>
         <form method="post" action="{% url 'tickets:delete' ticket.pk %}"
               onsubmit="return confirm('Delete this ticket and all its emails?')">
             {% csrf_token %}

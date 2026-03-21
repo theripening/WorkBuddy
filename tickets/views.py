@@ -370,6 +370,18 @@ def sync_outlook(request):
 
 
 @require_POST
+def sync_ticket(request, pk):
+    ticket = get_object_or_404(Ticket, pk=pk)
+    try:
+        from .sync import sync_ticket_conversations
+        new_emails = sync_ticket_conversations(ticket)
+        messages.success(request, f"Sync complete — {new_emails} new email(s).")
+    except Exception as e:
+        messages.error(request, f"Sync failed: {e}")
+    return redirect("tickets:detail", pk=pk)
+
+
+@require_POST
 def notify_ticket(request, pk):
     """Open Outlook compose addressed to the ticket's assignee with ticket details and latest email attached."""
     ticket = get_object_or_404(Ticket.objects.select_related("assignee"), pk=pk)

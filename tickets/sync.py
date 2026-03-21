@@ -382,3 +382,59 @@ def sync_tracked_folder():
 
     finally:
         pythoncom.CoUninitialize()
+
+
+def sync_ticket_conversations(ticket):
+    """
+    Sync all known conversations for a single ticket.
+    Uses stored outlook_ids as seeds — no folder/flag scan needed.
+    Returns count of newly inserted emails.
+    """
+    import pythoncom
+    import win32com.client
+
+    # One seed outlook_id per conversation
+    conv_seeds = {}
+    for outlook_id, conv_id in TicketEmail.objects.filter(ticket=ticket).values_list("outlook_id", "conversation_id"):
+        conv_seeds.setdefault(conv_id, outlook_id)
+
+    if not conv_seeds:
+        logger.info("Ticket %d has no emails to sync from", ticket.pk)
+        return 0
+
+    known_outlook_ids = set(TicketEmail.objects.values_list("outlook_id", flat=True))
+
+    logger.info("Syncing ticket %d: %d conversation(s)", ticket.pk, len(conv_seeds))
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        namespace = outlook.GetNamespace("MAPI")
+
+        to_save = []
+        for conv_id, seed_outlook_id in conv_seeds.items():
+            email_objs, timings = _collect_conversation_emails(namespace, seed_outlook_id, ticket, known_outlook_ids)
+            to_save.extend(email_objs)
+            logger.info(
+                "  conv %s: %d new, %d known",
+                conv_id[:16], len(email_objs), timings.get("skipped_known", 0),
+            )
+
+        seen = {}
+        for obj in to_save:
+            if obj.outlook_id not in seen:
+                seen[obj.outlook_id] = obj
+
+        inserted = 0
+        for obj in seen.values():
+            try:
+                obj.save()
+                inserted += 1
+            except Exception as e:
+                if "UNIQUE constraint" not in str(e):
+                    logger.error("SAVE ERROR outlook_id=%r: %s", obj.outlook_id, e)
+
+        logger.info("Ticket %d sync done: %d new email(s)", ticket.pk, inserted)
+        return inserted
+
+    finally:
+        pythoncom.CoUninitialize()
