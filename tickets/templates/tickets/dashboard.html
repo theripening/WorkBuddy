@@ -556,8 +556,13 @@
 {% endif %}
 
 {% if assigned_open_tickets %}
-<h6 class="text-muted fw-semibold small text-uppercase mb-2"><i class="bi bi-people me-1"></i>Assigned</h6>
-<div class="table-responsive">
+{% regroup assigned_open_tickets by ticket.assignee as assignee_groups %}
+{% for group in assignee_groups %}
+<h6 class="text-muted fw-semibold small text-uppercase mb-2 {% if not forloop.first %}mt-4{% endif %}">
+    <i class="bi bi-person me-1"></i>{{ group.grouper.name }}
+    <span class="badge bg-secondary ms-1" style="font-size:0.6rem;font-weight:normal">{{ group.list|length }}</span>
+</h6>
+<div class="table-responsive mb-1">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
     <thead class="table-secondary">
         <tr>
@@ -565,12 +570,11 @@
             <th>Subject</th>
             <th>Latest From</th>
             <th style="width:130px">Last Email</th>
-            <th style="width:130px">Assignee</th>
             <th style="width:110px">Status</th>
         </tr>
     </thead>
     <tbody>
-    {% for item in assigned_open_tickets %}{% with t=item.ticket %}
+    {% for item in group.list %}{% with t=item.ticket %}
     <tr class="{% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
@@ -583,7 +587,6 @@
         </td>
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
-        <td class="small fw-semibold">{{ t.assignee.name }}</td>
         <td>
             {% if t.status == "created" %}<span class="badge bg-primary">Created</span>
             {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark">Acknowledged</span>
@@ -594,6 +597,7 @@
     </tbody>
 </table>
 </div>
+{% endfor %}
 {% endif %}
 
 {% endif %}{# end has open tickets #}
