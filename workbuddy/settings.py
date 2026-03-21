@@ -1,6 +1,13 @@
+import os
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# When running as a PyInstaller bundle:
+#   - App files (templates, migrations) live in sys._MEIPASS (read-only temp dir)
+#   - User data (db.sqlite3) lives in WORKBUDDY_DATA_DIR (next to the .exe)
+_FROZEN = getattr(sys, "frozen", False)
+BASE_DIR = Path(sys._MEIPASS) if _FROZEN else Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ["WORKBUDDY_DATA_DIR"]) if "WORKBUDDY_DATA_DIR" in os.environ else BASE_DIR
 
 SECRET_KEY = "workbuddy-local-dev-key-replace-before-sharing"
 
@@ -51,7 +58,7 @@ WSGI_APPLICATION = "workbuddy.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": DATA_DIR / "db.sqlite3",
     }
 }
 
@@ -62,6 +69,11 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Whitenoise serves collected static files when running as a frozen bundle
+if _FROZEN:
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
 
 LOGGING = {
     "version": 1,
