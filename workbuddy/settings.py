@@ -100,6 +100,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Days before an open/in-progress ticket with no activity is considered stale
 STALE_DAYS = 7
 
+# WorkBuddyCloud shared ticket API — set to your VM's URL to enable
+# e.g. "http://192.168.1.50:8000"
+WORKBUDDY_CLOUD_URL = None
+
 # Controls which Outlook emails are pulled into WorkBuddy during sync.
 # "folder" — only emails in the Inbox > Tracked subfolder
 # "flag"   — only flagged (red flag) emails in the Inbox

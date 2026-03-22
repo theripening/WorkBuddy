@@ -210,8 +210,10 @@ def ticket_create(request):
 @require_POST
 def ticket_update(request, pk):
     from .sync import unflag_ticket_emails
+    from .cloud import forward_to_assignee, push_ticket, push_status
     ticket = get_object_or_404(Ticket, pk=pk)
     ticket.subject = request.POST.get("subject", ticket.subject) or ticket.subject
+    prev_assignee_id = ticket.assignee_id
     assignee_raw = request.POST.get("assignee", "")
     ticket.assignee_id = int(assignee_raw) if assignee_raw else None
     prev_status = ticket.status
@@ -219,11 +221,32 @@ def ticket_update(request, pk):
     ticket.priority = request.POST.get("priority", ticket.priority)
     ticket.notes = request.POST.get("notes", ticket.notes)
     ticket.save()
+
+    # Assignee changed and is now set — forward email + push to cloud
+    if ticket.assignee_id and ticket.assignee_id != prev_assignee_id:
+        assignee_email = ticket.assignee.email
+        if assignee_email:
+            try:
+                my_email = forward_to_assignee(ticket, assignee_email)
+                if my_email:
+                    push_ticket(ticket, assignee_email, my_email)
+            except Exception as e:
+                messages.warning(request, f"Ticket saved but could not forward to assignee: {e}")
+
+    # Status changed — push to cloud
+    if ticket.status != prev_status:
+        try:
+            push_status(ticket, ticket.status, my_email=None)
+        except Exception:
+            pass
+
+    # Ticket completed — unflag in Outlook
     if ticket.status == "completed" and prev_status != "completed":
         try:
             unflag_ticket_emails(ticket)
         except Exception as e:
             messages.warning(request, f"Ticket saved but could not unflag Outlook emails: {e}")
+
     return redirect(request.POST.get("next", "tickets:list"))
 
 

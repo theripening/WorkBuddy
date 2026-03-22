@@ -90,6 +90,26 @@
     </div>
 </div>
 
+{# Cloud Notes #}
+{% if ticket.cloud_notes.all %}
+<div class="card shadow-sm mb-4">
+    <div class="card-header py-2 d-flex align-items-center gap-2" style="font-size:0.85rem;font-weight:600">
+        <i class="bi bi-cloud me-1"></i>Team Notes
+    </div>
+    <ul class="list-group list-group-flush">
+        {% for note in ticket.cloud_notes.all %}
+        <li class="list-group-item py-2" style="font-size:0.875rem">
+            <div class="d-flex justify-content-between align-items-baseline mb-1">
+                <span class="fw-semibold text-muted small">{{ note.author_email }}</span>
+                <span class="text-muted small">{{ note.created_at|date:"M j, Y g:i a" }}</span>
+            </div>
+            <div>{{ note.text }}</div>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 {# Threads #}
 {% for thread in threads %}
 {% with latest=thread.0 %}

@@ -393,6 +393,18 @@ def sync_tracked_folder():
 
         total = time.perf_counter() - sync_start
         logger.info("=== Sync done in %.2fs — %d new tickets, %d new emails ===", total, new_tickets, inserted)
+
+        # Pull cloud notes for any tickets involving the current user
+        try:
+            from .cloud import sync_cloud_notes, get_my_email
+            my_email = get_my_email(namespace)
+            if my_email:
+                new_notes = sync_cloud_notes(my_email)
+                if new_notes:
+                    logger.info("Cloud: %d new note(s) pulled", new_notes)
+        except Exception as e:
+            logger.warning("Cloud note sync failed: %s", e)
+
         return new_tickets, inserted
 
     finally:

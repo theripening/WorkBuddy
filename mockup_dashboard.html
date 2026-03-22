@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkBuddy 2.0 — Dashboard Mockup</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background-color: #f0f2f5; }
+        .navbar-brand { font-weight: 700; font-size: 1.1rem; }
+        .navbar-brand .app-version { font-weight: 300; opacity: 0.7; font-size: 0.8rem; }
+        .stat-card { border: none; border-radius: 10px; }
+        .stat-card .stat-number { font-size: 2rem; font-weight: 700; line-height: 1; }
+        .stat-card .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8; }
+        .tab-pane table { font-size: 0.875rem; }
+        .subject-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .stale-days { font-size: 0.7rem; white-space: nowrap; }
+        .priority-high { border-left: 3px solid #dc3545; }
+        .priority-med  { border-left: 3px solid #ffc107; }
+        .priority-low  { border-left: 3px solid #adb5bd; }
+        .nav-tabs .nav-link { color: #495057; }
+        .nav-tabs .nav-link.active { font-weight: 600; }
+        .badge-tab { font-size: 0.65rem; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
+    <div class="container-fluid">
+        <span class="navbar-brand">
+            <i class="bi bi-tools me-2"></i>WorkBuddy
+            <span class="app-version ms-1">2.0</span>
+        </span>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-light btn-sm">
+                <i class="bi bi-plus-lg me-1"></i>New Ticket
+            </button>
+            <button class="btn btn-success btn-sm">
+                <i class="bi bi-arrow-clockwise me-1"></i>Sync Outlook
+            </button>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+    <!-- Stat cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card stat-card bg-danger text-white shadow-sm p-3">
+                <div class="stat-number">3</div>
+                <div class="stat-label mt-1">Overdue</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card stat-card bg-warning text-dark shadow-sm p-3">
+                <div class="stat-number">5</div>
+                <div class="stat-label mt-1">Stale (&gt;7 days)</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card stat-card bg-secondary text-white shadow-sm p-3">
+                <div class="stat-number">8</div>
+                <div class="stat-label mt-1">Needs Triage</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card stat-card bg-primary text-white shadow-sm p-3">
+                <div class="stat-number">24</div>
+                <div class="stat-label mt-1">Total Open</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-0" id="dashTabs">
+        <li class="nav-item">
+            <a class="nav-link active" data-bs-toggle="tab" href="#todo">
+                <i class="bi bi-check2-square me-1"></i>To-Do
+                <span class="badge bg-primary badge-tab ms-1">6</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#stale">
+                <i class="bi bi-hourglass-split me-1"></i>Stale
+                <span class="badge bg-warning text-dark badge-tab ms-1">5</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#triage">
+                <i class="bi bi-inbox me-1"></i>Needs Triage
+                <span class="badge bg-secondary badge-tab ms-1">8</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#recent">
+                <i class="bi bi-envelope me-1"></i>Recent
+                <span class="badge bg-info text-dark badge-tab ms-1">4</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#all">
+                <i class="bi bi-list me-1"></i>All Tickets
+            </a>
+        </li>
+    </ul>
+
+    <div class="tab-content bg-white border border-top-0 rounded-bottom shadow-sm p-3">
+
+        <!-- TO-DO TAB -->
+        <div class="tab-pane fade show active" id="todo">
+            <table class="table table-hover table-bordered mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:36px"><i class="bi bi-check2-square"></i></th>
+                        <th style="width:70px">Priority</th>
+                        <th>Subject</th>
+                        <th style="width:110px">Due</th>
+                        <th style="width:110px">Assignee</th>
+                        <th style="width:110px">Status</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="table-danger priority-high">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-danger">High</span></td>
+                        <td class="subject-cell"><strong>Re: Server outage — need response</strong></td>
+                        <td class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Mar 14</td>
+                        <td>MA</td>
+                        <td><span class="badge bg-warning text-dark">In Progress</span></td>
+                        <td class="text-muted small">Follow up with hosting provider</td>
+                    </tr>
+                    <tr class="table-danger priority-high">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-danger">High</span></td>
+                        <td class="subject-cell"><strong>Contract renewal deadline</strong></td>
+                        <td class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>Mar 16</td>
+                        <td>Me</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="text-muted small">Get sign-off from legal</td>
+                    </tr>
+                    <tr class="priority-med">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-warning text-dark">Med</span></td>
+                        <td class="subject-cell">Quote request — Johnson account</td>
+                        <td>Mar 20</td>
+                        <td>TB</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="text-muted small">Send updated pricing sheet</td>
+                    </tr>
+                    <tr class="priority-med">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-warning text-dark">Med</span></td>
+                        <td class="subject-cell">Onboarding docs for new client</td>
+                        <td>Mar 22</td>
+                        <td>Me</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="text-muted small">Draft welcome email</td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Update internal wiki</td>
+                        <td class="text-muted">—</td>
+                        <td>MA</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="text-muted small">No rush but don't forget</td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Re: Annual review scheduling</td>
+                        <td class="text-muted">—</td>
+                        <td>Me</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="text-muted small">Reply when calendar clears</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- STALE TAB -->
+        <div class="tab-pane fade" id="stale">
+            <p class="text-muted small mb-2">Open or in-progress tickets with no activity for more than <strong>7 days</strong>.</p>
+            <table class="table table-hover table-bordered mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:70px">Priority</th>
+                        <th>Subject</th>
+                        <th style="width:120px">Last Activity</th>
+                        <th style="width:100px">Stale For</th>
+                        <th style="width:110px">Assignee</th>
+                        <th style="width:110px">Status</th>
+                        <th style="width:80px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="priority-high">
+                        <td><span class="badge bg-danger">High</span></td>
+                        <td class="subject-cell">Billing dispute — Acme Corp</td>
+                        <td class="text-muted small">Feb 28</td>
+                        <td><span class="badge bg-danger">18 days</span></td>
+                        <td>TB</td>
+                        <td><span class="badge bg-warning text-dark">In Progress</span></td>
+                        <td><button class="btn btn-outline-primary btn-sm">Review</button></td>
+                    </tr>
+                    <tr class="priority-med">
+                        <td><span class="badge bg-warning text-dark">Med</span></td>
+                        <td class="subject-cell">Software licence renewal</td>
+                        <td class="text-muted small">Mar 4</td>
+                        <td><span class="badge bg-danger">14 days</span></td>
+                        <td>Me</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td><button class="btn btn-outline-primary btn-sm">Review</button></td>
+                    </tr>
+                    <tr class="priority-med">
+                        <td><span class="badge bg-warning text-dark">Med</span></td>
+                        <td class="subject-cell">Vendor proposal review</td>
+                        <td class="text-muted small">Mar 7</td>
+                        <td><span class="badge bg-warning text-dark">11 days</span></td>
+                        <td>MA</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td><button class="btn btn-outline-primary btn-sm">Review</button></td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Office supplies order</td>
+                        <td class="text-muted small">Mar 9</td>
+                        <td><span class="badge bg-warning text-dark">9 days</span></td>
+                        <td>Me</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td><button class="btn btn-outline-primary btn-sm">Review</button></td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Re: Team lunch planning</td>
+                        <td class="text-muted small">Mar 10</td>
+                        <td><span class="badge bg-secondary">8 days</span></td>
+                        <td>TB</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td><button class="btn btn-outline-primary btn-sm">Review</button></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- NEEDS TRIAGE TAB -->
+        <div class="tab-pane fade" id="triage">
+            <p class="text-muted small mb-2">Open tickets with no to-do set — decide what to do with these.</p>
+            <table class="table table-hover table-bordered mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:36px"><i class="bi bi-check2-square"></i></th>
+                        <th>Subject</th>
+                        <th>Latest From</th>
+                        <th style="width:130px">Received</th>
+                        <th style="width:110px">Assignee</th>
+                        <th style="width:110px">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                        <td class="subject-cell">Partnership inquiry — TechFlow Ltd</td>
+                        <td class="small text-muted">Sarah Chen &lt;sarah@techflow.com&gt;</td>
+                        <td class="small">Mar 17, 9:14 AM</td>
+                        <td>—</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                    <tr>
+                        <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                        <td class="subject-cell">Support request — login issues</td>
+                        <td class="small text-muted">mike@clientco.com</td>
+                        <td class="small">Mar 16, 2:30 PM</td>
+                        <td>—</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                    <tr>
+                        <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                        <td class="subject-cell">Invoice question — March billing</td>
+                        <td class="small text-muted">accounts@bigcorp.com</td>
+                        <td class="small">Mar 15, 11:05 AM</td>
+                        <td>—</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                    <tr>
+                        <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                        <td class="subject-cell">Feature request — export to PDF</td>
+                        <td class="small text-muted">james@customer.io</td>
+                        <td class="small">Mar 14, 4:18 PM</td>
+                        <td>—</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- RECENT TAB -->
+        <div class="tab-pane fade" id="recent">
+            <p class="text-muted small mb-2">Tickets that received new emails in the last <strong>7 days</strong>.</p>
+            <table class="table table-hover table-bordered mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:70px">Priority</th>
+                        <th>Subject</th>
+                        <th>Latest From</th>
+                        <th style="width:130px">Received</th>
+                        <th style="width:110px">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="priority-high">
+                        <td><span class="badge bg-danger">High</span></td>
+                        <td class="subject-cell">Re: Server outage — need response</td>
+                        <td class="small text-muted">ops@hosting.com</td>
+                        <td class="small">Today, 8:02 AM</td>
+                        <td><span class="badge bg-warning text-dark">In Progress</span></td>
+                    </tr>
+                    <tr class="priority-med">
+                        <td><span class="badge bg-warning text-dark">Med</span></td>
+                        <td class="subject-cell">Quote request — Johnson account</td>
+                        <td class="small text-muted">johnson@email.com</td>
+                        <td class="small">Yesterday, 3:45 PM</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Partnership inquiry — TechFlow Ltd</td>
+                        <td class="small text-muted">sarah@techflow.com</td>
+                        <td class="small">Mar 16, 9:14 AM</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Support request — login issues</td>
+                        <td class="small text-muted">mike@clientco.com</td>
+                        <td class="small">Mar 15, 2:30 PM</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ALL TICKETS TAB -->
+        <div class="tab-pane fade" id="all">
+            <div class="row g-2 mb-3 align-items-center">
+                <div class="col-auto">
+                    <input type="text" class="form-control form-control-sm" placeholder="Search subject or sender">
+                </div>
+                <div class="col-auto">
+                    <select class="form-select form-select-sm">
+                        <option>All Statuses</option>
+                        <option>Open</option>
+                        <option>In Progress</option>
+                        <option>Closed</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <select class="form-select form-select-sm">
+                        <option>All Assignees</option>
+                        <option>Me</option>
+                        <option>MA</option>
+                        <option>TB</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <select class="form-select form-select-sm">
+                        <option>All Priorities</option>
+                        <option>High</option>
+                        <option>Medium</option>
+                        <option>Low</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-primary btn-sm">Filter</button>
+                    <button class="btn btn-outline-secondary btn-sm">Clear</button>
+                </div>
+            </div>
+            <table class="table table-hover table-bordered mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:36px"><i class="bi bi-check2-square"></i></th>
+                        <th style="width:70px">Priority</th>
+                        <th>Subject</th>
+                        <th style="width:110px">Due</th>
+                        <th style="width:110px">Assignee</th>
+                        <th style="width:110px">Status</th>
+                        <th>Latest Reply</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="table-danger priority-high">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-danger">High</span></td>
+                        <td class="subject-cell"><strong>Re: Server outage — need response</strong></td>
+                        <td class="text-danger fw-semibold">Mar 14</td>
+                        <td>MA</td>
+                        <td><span class="badge bg-warning text-dark">In Progress</span></td>
+                        <td class="small text-muted">ops@hosting.com — Today 8:02 AM</td>
+                    </tr>
+                    <tr class="priority-med">
+                        <td class="text-center"><input type="checkbox" class="form-check-input" checked></td>
+                        <td><span class="badge bg-warning text-dark">Med</span></td>
+                        <td class="subject-cell">Quote request — Johnson account</td>
+                        <td>Mar 20</td>
+                        <td>TB</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="small text-muted">johnson@email.com — Yesterday</td>
+                    </tr>
+                    <tr class="priority-low">
+                        <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell">Partnership inquiry — TechFlow Ltd</td>
+                        <td class="text-muted">—</td>
+                        <td>—</td>
+                        <td><span class="badge bg-primary">Open</span></td>
+                        <td class="small text-muted">sarah@techflow.com — Mar 17</td>
+                    </tr>
+                    <tr class="table-secondary">
+                        <td class="text-center"><input type="checkbox" class="form-check-input"></td>
+                        <td><span class="badge bg-secondary">Low</span></td>
+                        <td class="subject-cell text-muted">Old support ticket — resolved</td>
+                        <td class="text-muted">—</td>
+                        <td>Me</td>
+                        <td><span class="badge bg-secondary">Closed</span></td>
+                        <td class="small text-muted">user@example.com — Feb 10</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div><!-- end tab-content -->
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

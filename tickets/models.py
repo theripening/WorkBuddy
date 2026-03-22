@@ -123,3 +123,18 @@ class WaitingOn(models.Model):
     def days_waiting(self):
         end = self.resolved_at if self.resolved_at else timezone.now().date()
         return (end - self.asked_date).days
+
+
+class CloudNote(models.Model):
+    """A note pulled from WorkBuddyCloud — written by the assigner or assignee."""
+    ticket = models.ForeignKey(Ticket, related_name="cloud_notes", on_delete=models.CASCADE)
+    author_email = models.EmailField()
+    text = models.TextField()
+    created_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["created_at"]
+        unique_together = [["ticket", "author_email", "created_at"]]
+
+    def __str__(self):
+        return f"{self.author_email}: {self.text[:60]}"
