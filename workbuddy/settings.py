@@ -102,7 +102,7 @@ STALE_DAYS = 7
 
 # WorkBuddyCloud shared ticket API — set to your VM's URL to enable
 # e.g. "http://192.168.1.50:8000"
-WORKBUDDY_CLOUD_URL = None
+WORKBUDDY_CLOUD_URL = "http://localhost:8765"
 
 # Controls which Outlook emails are pulled into WorkBuddy during sync.
 # "folder" — only emails in the Inbox > Tracked subfolder
