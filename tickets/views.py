@@ -118,7 +118,20 @@ def dashboard(request):
 
     open_count = len(my_open_tickets)
     team_open_count = len(assigned_open_tickets)
-    
+
+    # --- WORK tab: todos + open tickets grouped by person ---
+    from collections import defaultdict
+    _team_todos_by = defaultdict(list)
+    for row in team_todos:
+        _team_todos_by[row["item"].assignee.name].append(row)
+    _team_tickets_by = defaultdict(list)
+    for row in assigned_open_tickets:
+        _team_tickets_by[row["ticket"].assignee.name].append(row)
+    _all_names = sorted(set(list(_team_todos_by.keys()) + list(_team_tickets_by.keys())))
+    work_groups_list = [{"label": "Mine", "todos": my_todos, "tickets": my_open_tickets}] + [
+        {"label": name, "todos": _team_todos_by[name], "tickets": _team_tickets_by[name]}
+        for name in _all_names
+    ]
 
 
     # --- ALL tab ---
@@ -150,6 +163,7 @@ def dashboard(request):
         "waiting_count": waiting_count,
         "open_count": open_count,
         "team_open_count": team_open_count,
+        "work_groups_list": work_groups_list,
         "my_todos": my_todos,
         "team_todos": team_todos,
         "stale_tickets": stale_tickets,
