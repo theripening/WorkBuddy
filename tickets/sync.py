@@ -65,21 +65,38 @@ def _row_get(row, key, default=None):
         return default
 
 
-def _build_email_from_row(ticket, row, namespace=None, conv_id=""):
-    """Build TicketEmail from a conversation table row, fetching body via COM."""
+def _build_email_from_row(ticket, row, namespace=None, conv_id="", known_outlook_ids=None):
+    """
+    Build TicketEmail from a conversation table row, fetching body via COM.
+
+    Outlook's GetConversation().GetTable() returns session-temporary short-form
+    EntryIDs that change each time Outlook connects. We call GetItemFromID to
+    fetch the body anyway, so we use live.EntryID (the stable store-bound ID)
+    as the outlook_id. We also do a secondary check against known_outlook_ids
+    with the stable ID so we don't re-save emails whose short-form ID changed.
+
+    Returns (TicketEmail | None). None means the email is already known.
+    """
+    short_id = row["EntryID"]
+    stable_id = short_id
     body = ""
     if namespace is not None:
         try:
-            live = namespace.GetItemFromID(row["EntryID"])
+            live = namespace.GetItemFromID(short_id)
+            stable_id = live.EntryID  # normalised, persistent across sessions
             body = (live.Body or "")[:300].strip()
         except Exception as e:
-            logger.debug("Body fetch failed for %s: %s", _row_get(row, "EntryID"), e)
+            logger.debug("Body fetch failed for %s: %s", short_id, e)
+    # Secondary known-check with stable ID — catches emails whose short-form ID
+    # changed since last sync
+    if known_outlook_ids is not None and stable_id != short_id and stable_id in known_outlook_ids:
+        return None
     received_raw = _row_get(row, "ReceivedTime") or _row_get(row, "SentOn")
     if received_raw is None:
-        raise ValueError(f"No ReceivedTime or SentOn for EntryID {_row_get(row, 'EntryID')}")
+        raise ValueError(f"No ReceivedTime or SentOn for EntryID {short_id}")
     return TicketEmail(
         ticket=ticket,
-        outlook_id=row["EntryID"],
+        outlook_id=stable_id,
         conversation_id=_row_get(row, "ConversationID") or conv_id,
         subject=_row_get(row, "Subject") or "(no subject)",
         sender=_row_get(row, "SenderName") or "",
@@ -146,10 +163,11 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, known_outlook
                     entry_id = row["EntryID"]
                     if entry_id in emails_by_entry_id:
                         continue
-                    if entry_id in known_outlook_ids:
+                    result = _build_email_from_row(ticket, row, namespace, conv_id, known_outlook_ids)
+                    if result is None:
                         skipped_known += 1
                         continue
-                    emails_by_entry_id[entry_id] = _build_email_from_row(ticket, row, namespace, conv_id)
+                    emails_by_entry_id[result.outlook_id] = result
                 except Exception as e:
                     logger.warning("Skipping table row: %s", e)
             timings["TableWalk"] = time.perf_counter() - t0
