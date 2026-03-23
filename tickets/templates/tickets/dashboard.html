@@ -23,10 +23,16 @@
         <a href="{% url 'tickets:create' %}" class="btn btn-outline-primary btn-sm">
             <i class="bi bi-plus-lg me-1"></i>New Ticket
         </a>
+        <form method="post" action="{% url 'tickets:sync_new' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-success btn-sm">
+                <i class="bi bi-lightning-charge me-1"></i>Sync New
+            </button>
+        </form>
         <form method="post" action="{% url 'tickets:sync' %}">
             {% csrf_token %}
             <button type="submit" class="btn btn-success btn-sm">
-                <i class="bi bi-arrow-clockwise me-1"></i>Sync Outlook
+                <i class="bi bi-arrow-clockwise me-1"></i>Full Sync
             </button>
         </form>
     </div>

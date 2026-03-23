@@ -497,6 +497,71 @@ def sync_ticket_conversations(ticket):
         pythoncom.CoUninitialize()
 
 
+def sync_new_flagged():
+    """
+    Quick scan: create tickets only for brand-new flagged conversations.
+
+    Skips the full GetConversation().GetTable() walk entirely — just stores
+    the seed email directly from the flagged item. Existing tickets are
+    untouched. Use this for fast triage; run full sync periodically to
+    pull complete conversation threads.
+
+    Returns (new_tickets, new_emails) counts.
+    """
+    import pythoncom
+    import win32com.client
+
+    logger.info("=== WorkBuddy Quick Sync Start ===")
+    t_start = time.perf_counter()
+
+    pythoncom.CoInitialize()
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        namespace = outlook.GetNamespace("MAPI")
+
+        known_convs = set(TicketEmail.objects.values_list("conversation_id", flat=True))
+        logger.info("Quick sync: %d known conversations", len(known_convs))
+
+        todo_folder = namespace.GetDefaultFolder(OL_FOLDER_TODO)
+        mail_todos = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
+
+        seen_conv_ids = set()
+        new_tickets = 0
+        new_emails = 0
+
+        item = mail_todos.GetFirst()
+        while item is not None:
+            try:
+                if item.FlagStatus != OL_FLAG_MARKED:
+                    item = mail_todos.GetNext()
+                    continue
+                cid = item.ConversationID
+                if not cid or cid in seen_conv_ids or cid in known_convs:
+                    item = mail_todos.GetNext()
+                    continue
+                seen_conv_ids.add(cid)
+
+                ticket = Ticket.objects.create(subject=item.Subject or "(no subject)")
+                email_obj = _build_email_obj(ticket, item)
+                email_obj.is_seed = True
+                email_obj.save()
+                new_tickets += 1
+                new_emails += 1
+                logger.info("Quick new ticket %d: %s", ticket.pk, (item.Subject or "")[:60])
+            except Exception as e:
+                logger.warning("Quick sync skipping item: %s", e)
+            item = mail_todos.GetNext()
+
+        logger.info(
+            "=== Quick sync done in %.2fs — %d new ticket(s), %d new email(s) ===",
+            time.perf_counter() - t_start, new_tickets, new_emails,
+        )
+        return new_tickets, new_emails
+
+    finally:
+        pythoncom.CoUninitialize()
+
+
 def unflag_ticket_emails(ticket):
     """
     Clear the Outlook follow-up flag on all seed emails for the given ticket.

@@ -401,6 +401,17 @@ def sync_outlook(request):
 
 
 @require_POST
+def sync_new_outlook(request):
+    try:
+        from .sync import sync_new_flagged
+        new_tickets, new_emails = sync_new_flagged()
+        messages.success(request, f"Quick sync complete — {new_tickets} new ticket(s).")
+    except Exception as e:
+        messages.error(request, f"Quick sync failed: {e}")
+    return redirect("tickets:list")
+
+
+@require_POST
 def sync_ticket(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     try:
