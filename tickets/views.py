@@ -102,6 +102,7 @@ def dashboard(request):
             "item": w,
             "overdue": w.expected_date and w.expected_date < today,
             "days_waiting": w.days_waiting(),
+            "blocking_count": w.dependent_todos.filter(done=False).count(),
         })
 
     # --- OPEN tab ---
@@ -391,8 +392,8 @@ def open_in_outlook(request, email_pk):
 @require_POST
 def sync_outlook(request):
     try:
-        from .sync import sync_tracked_folder
-        new_tickets, new_emails = sync_tracked_folder()
+        from .sync import sync_flagged_emails
+        new_tickets, new_emails = sync_flagged_emails()
         messages.success(request, f"Sync complete — {new_tickets} new ticket(s), {new_emails} new email(s).")
     except Exception as e:
         messages.error(request, f"Sync failed: {e}")

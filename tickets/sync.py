@@ -3,17 +3,13 @@ import time
 from collections import Counter
 from datetime import datetime
 
-from django.conf import settings
-
 from .models import Ticket, TicketEmail
 
 logger = logging.getLogger(__name__)
 
-TRACKED_FOLDER_NAME = "Tracked"
-
 # Outlook folder/flag constants
 OL_FLAG_MARKED = 2
-OL_FOLDER_INBOX = 6
+OL_FLAG_NOT_FLAGGED = 0
 OL_FOLDER_TODO = 28
 
 # Columns fetched in a single GetTable call — no body preview here;
@@ -178,20 +174,14 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, known_outlook
     return list(emails_by_entry_id.values()), timings
 
 
-def sync_tracked_folder():
+def sync_flagged_emails():
     """
-    Connect to the running Outlook instance and sync tracked emails + their full
+    Connect to Outlook and sync all flagged emails (To-Do folder) + their full
     conversations into the DB. Returns (new_tickets, new_emails) counts.
 
-    Tracking sources are controlled by TRACK_MODE in settings:
-      "folder" — Inbox > Tracked subfolder
-      "flag"   — flagged (red flag) emails in Inbox
-      "both"   — either source (default)
-
-    Each sync walks conversations fresh to catch new emails. Already-known
-    outlook_ids skip the COM body fetch. Individual saves catch constraint
-    violations explicitly (bulk_create ignore_conflicts silently drops on
-    any constraint violation in SQLite, not just UNIQUE).
+    Only flagged (red flag) emails are used as ticket seeds. Each sync walks
+    conversations fresh to catch new replies. Already-known outlook_ids skip
+    the COM body fetch. Individual saves catch constraint violations explicitly.
     """
     import pythoncom
     import win32com.client
@@ -204,22 +194,23 @@ def sync_tracked_folder():
         t0 = time.perf_counter()
         outlook = win32com.client.Dispatch("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
-        inbox = namespace.GetDefaultFolder(OL_FOLDER_INBOX)
         logger.info("Outlook connected in %.3fs", time.perf_counter() - t0)
 
-        track_mode = getattr(settings, "TRACK_MODE", "folder")
-        logger.info("TRACK_MODE = %r", track_mode)
-
-        # Pre-load known conversations and email IDs from DB in one query
+        # Pre-load known conversations, email IDs, and seed outlook_ids from DB
         t0 = time.perf_counter()
-        known_convs = {}
+        known_convs = {}       # conv_id -> ticket_id
         known_outlook_ids = set()
-        for outlook_id, conv_id, ticket_id in TicketEmail.objects.values_list("outlook_id", "conversation_id", "ticket_id"):
+        conv_to_seed = {}      # conv_id -> seed outlook_id (avoids re-fetch for known convs)
+        for outlook_id, conv_id, ticket_id, is_seed in TicketEmail.objects.values_list(
+            "outlook_id", "conversation_id", "ticket_id", "is_seed"
+        ):
             known_convs[conv_id] = ticket_id
             known_outlook_ids.add(outlook_id)
+            if is_seed:
+                conv_to_seed[conv_id] = outlook_id
         logger.info(
-            "DB pre-load: %d conversations, %d emails in %.3fs",
-            len(known_convs), len(known_outlook_ids), time.perf_counter() - t0,
+            "DB pre-load: %d conversations, %d emails, %d seeds in %.3fs",
+            len(known_convs), len(known_outlook_ids), len(conv_to_seed), time.perf_counter() - t0,
         )
 
         # Pre-load all tickets referenced by known conversations in one query
@@ -227,73 +218,70 @@ def sync_tracked_folder():
         tickets_cache = {t.pk: t for t in Ticket.objects.filter(pk__in=set(known_convs.values()))}
         logger.debug("Tickets pre-loaded: %d in %.3fs", len(tickets_cache), time.perf_counter() - t0)
 
-        # Collect seed items from configured sources, deduplicating by ConversationID
-        seen_conv_ids = set()
-        convs_to_process = []  # list of (conv_id, entry_id, subject)
-
-        def _collect_from_items(mail_items):
-            count = mail_items.Count
-            for i in range(1, count + 1):
-                try:
-                    item = mail_items.Item(i)
-                    cid = item.ConversationID
-                    if cid not in seen_conv_ids:
-                        seen_conv_ids.add(cid)
-                        convs_to_process.append((cid, item.EntryID, item.Subject or "(no subject)"))
-                except Exception as e:
-                    logger.debug("Skipping mail item %d: %s", i, e)
-
-        # --- Tracked subfolder ---
-        if track_mode in ("folder", "both"):
-            t0 = time.perf_counter()
-            tracked = None
-            for folder in inbox.Folders:
-                if folder.Name == TRACKED_FOLDER_NAME:
-                    tracked = folder
-                    break
-            if tracked is None and track_mode == "folder":
-                raise ValueError(
-                    f'Outlook folder "{TRACKED_FOLDER_NAME}" not found under Inbox. '
-                    "Create it and move emails there, or set TRACK_MODE = 'flag'."
-                )
-            if tracked is not None:
-                _collect_from_items(tracked.Items.Restrict("[MessageClass] = 'IPM.Note'"))
-            logger.info("Folder collection: %d convs in %.3fs", len(convs_to_process), time.perf_counter() - t0)
-
-        # --- Flagged emails via To-Do special folder ---
+        # --- Collect flagged emails from the To-Do virtual folder ---
         # olFolderToDo aggregates flagged items from all folders — no recursion needed.
         # GetTable() and FlagStatus in Restrict both fail on this virtual folder, so
         # we Restrict by MessageClass only, then check FlagStatus in Python.
-        # Re-fetch each seed via GetItemFromID to get a real store-bound item so
-        # GetConversation() works correctly.
-        if track_mode in ("flag", "both"):
-            t0 = time.perf_counter()
-            before = len(convs_to_process)
-            try:
-                todo_folder = namespace.GetDefaultFolder(OL_FOLDER_TODO)
-                mail_todos = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
-                count = mail_todos.Count
-                logger.debug("To-Do folder: %d mail item(s)", count)
-                for i in range(1, count + 1):
-                    try:
-                        item = mail_todos.Item(i)
-                        if item.FlagStatus != OL_FLAG_MARKED:
-                            continue
-                        cid = item.ConversationID
-                        if cid and cid not in seen_conv_ids:
-                            seen_conv_ids.add(cid)
-                            # Re-fetch from MAPI — virtual folder items may have
-                            # shortcut EntryIDs that cause GetConversation() to fail
-                            real_entry_id = namespace.GetItemFromID(item.EntryID).EntryID
-                            convs_to_process.append((cid, real_entry_id, item.Subject or "(no subject)"))
-                    except Exception as e:
-                        logger.debug("Skipping flagged item %d: %s", i, e)
-            except Exception as e:
-                logger.warning("To-Do folder error: %s", e)
-            logger.info(
-                "Flag collection: +%d convs (%d total) in %.3fs",
-                len(convs_to_process) - before, len(convs_to_process), time.perf_counter() - t0,
-            )
+        # GetFirst/GetNext cursor is used instead of Item(i) indexed access —
+        # indexed access on COM collections is O(n²); cursor is O(n).
+        t0 = time.perf_counter()
+        seen_conv_ids = set()
+        convs_to_process = []  # list of (conv_id, entry_id, subject)
+        seeds_to_heal = []     # outlook_ids that need is_seed=True written back to DB
+        todo_scanned = 0
+        todo_flagged = 0
+        count_seed_hit = 0
+        count_seed_heal = 0
+        count_new = 0
+        try:
+            todo_folder = namespace.GetDefaultFolder(OL_FOLDER_TODO)
+            mail_todos = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
+            item = mail_todos.GetFirst()
+            while item is not None:
+                try:
+                    todo_scanned += 1
+                    if item.FlagStatus != OL_FLAG_MARKED:
+                        item = mail_todos.GetNext()
+                        continue
+                    todo_flagged += 1
+                    cid = item.ConversationID
+                    if not cid or cid in seen_conv_ids:
+                        item = mail_todos.GetNext()
+                        continue
+                    seen_conv_ids.add(cid)
+
+                    if cid in conv_to_seed:
+                        # Known conv, seed on file — no COM call needed
+                        entry_id = conv_to_seed[cid]
+                        count_seed_hit += 1
+                    elif cid in known_convs:
+                        # Known conv, seed missing — use item directly and heal DB after loop
+                        entry_id = item.EntryID
+                        seeds_to_heal.append(entry_id)
+                        count_seed_heal += 1
+                    else:
+                        # Brand new conversation
+                        entry_id = item.EntryID
+                        count_new += 1
+
+                    convs_to_process.append((cid, entry_id, item.Subject or "(no subject)"))
+                except Exception as e:
+                    logger.debug("Skipping flagged item: %s", e)
+                item = mail_todos.GetNext()
+        except Exception as e:
+            logger.warning("To-Do folder error: %s", e)
+
+        # Heal missing is_seed flags so next sync skips the re-fetch
+        if seeds_to_heal:
+            healed = TicketEmail.objects.filter(outlook_id__in=seeds_to_heal).update(is_seed=True)
+            logger.info("Healed is_seed on %d email(s)", healed)
+
+        logger.info(
+            "Flag scan: %d scanned, %d flagged, %d unique convs "
+            "(seed_hit=%d heal=%d new=%d) in %.3fs",
+            todo_scanned, todo_flagged, len(convs_to_process),
+            count_seed_hit, count_seed_heal, count_new, time.perf_counter() - t0,
+        )
 
         logger.info("Conversations to process: %d", len(convs_to_process))
 
@@ -336,6 +324,14 @@ def sync_tracked_folder():
                 elapsed = time.perf_counter() - conv_start
                 label = "NEW" if is_new else "sync"
                 extras = []
+                if timings.get("GetItemFromID"):
+                    extras.append(f"seed={timings['GetItemFromID']:.3f}s")
+                if timings.get("GetConversation"):
+                    extras.append(f"conv={timings['GetConversation']:.3f}s")
+                if timings.get("GetTable"):
+                    extras.append(f"tbl={timings['GetTable']:.3f}s")
+                if timings.get("TableWalk"):
+                    extras.append(f"walk={timings['TableWalk']:.3f}s")
                 if timings.get("skipped_known"):
                     extras.append(f"known={timings['skipped_known']}")
                 if timings.get("skipped_class"):
@@ -394,7 +390,7 @@ def sync_tracked_folder():
         total = time.perf_counter() - sync_start
         logger.info("=== Sync done in %.2fs — %d new tickets, %d new emails ===", total, new_tickets, inserted)
 
-        # Pull cloud notes for any tickets involving the current user
+        # Pull cloud notes if cloud is configured
         try:
             from .cloud import sync_cloud_notes, get_my_email
             my_email = get_my_email(namespace)
@@ -465,10 +461,6 @@ def sync_ticket_conversations(ticket):
 
     finally:
         pythoncom.CoUninitialize()
-
-
-OL_FLAG_COMPLETE = 1
-OL_FLAG_NOT_FLAGGED = 0
 
 
 def unflag_ticket_emails(ticket):

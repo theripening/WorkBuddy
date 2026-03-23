@@ -153,7 +153,14 @@
                 </button>
             </form>
         </td>
-        <td>{{ item.what }}{% if row.blocked %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem" title="Waiting: {{ item.waiting_on.what }}">⏳ blocked</span>{% endif %}</td>
+        <td>
+            <input type="text" name="what" form="todo-asgn-{{ item.pk }}"
+                   value="{{ item.what }}"
+                   class="form-control form-control-sm border-0 bg-transparent px-0"
+                   onblur="document.getElementById('todo-asgn-{{ item.pk }}').submit()"
+                   style="min-width:160px">
+            {% if row.blocked %}<span class="badge bg-warning text-dark mt-1 d-inline-block" style="font-size:0.65rem" title="Waiting: {{ item.waiting_on.what }}">⏳ blocked</span>{% endif %}
+        </td>
         <td class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
             {% if item.due_date %}
                 {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
@@ -227,7 +234,14 @@
                 </button>
             </form>
         </td>
-        <td>{{ item.what }}{% if row.blocked %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem" title="Waiting: {{ item.waiting_on.what }}">⏳ blocked</span>{% endif %}</td>
+        <td>
+            <input type="text" name="what" form="todo-asgn-{{ item.pk }}"
+                   value="{{ item.what }}"
+                   class="form-control form-control-sm border-0 bg-transparent px-0"
+                   onblur="document.getElementById('todo-asgn-{{ item.pk }}').submit()"
+                   style="min-width:160px">
+            {% if row.blocked %}<span class="badge bg-warning text-dark mt-1 d-inline-block" style="font-size:0.65rem" title="Waiting: {{ item.waiting_on.what }}">⏳ blocked</span>{% endif %}
+        </td>
         <td class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
             {% if item.due_date %}
                 {% if row.overdue %}<i class="bi bi-exclamation-triangle me-1"></i>{% endif %}
@@ -371,7 +385,13 @@
             </select>
         </td>
         <td class="subject-cell">
-            <a href="{% url 'tickets:detail' t.pk %}" class="text-decoration-none fw-semibold text-dark">{{ t.subject }}</a>
+            <div class="d-flex align-items-center gap-1">
+                <input type="text" value="{{ t.subject }}"
+                       class="form-control form-control-sm border-0 bg-transparent fw-semibold px-0"
+                       onblur="var f=document.getElementById('upd-{{ t.pk }}');f.querySelector('[name=subject]').value=this.value;f.submit()"
+                       style="min-width:160px">
+                <a href="{% url 'tickets:detail' t.pk %}" class="text-muted flex-shrink-0" title="Open ticket"><i class="bi bi-box-arrow-up-right" style="font-size:0.75rem"></i></a>
+            </div>
         </td>
         <td class="small text-muted">{{ item.latest.sender|default:"—" }}</td>
         <td class="small">{{ item.latest.received_at|date:"M j, Y"|default:"—" }}</td>
@@ -467,7 +487,10 @@
     <tbody>
     {% for row in waiting_on_list %}{% with w=row.item %}
     <tr class="{% if row.overdue %}table-danger{% endif %}">
-        <td>{{ w.what }}</td>
+        <td>
+            {{ w.what }}
+            {% if row.blocking_count %}<span class="badge bg-danger ms-1" style="font-size:0.65rem" title="Blocking {{ row.blocking_count }} to-do(s)">⛔ blocks {{ row.blocking_count }}</span>{% endif %}
+        </td>
         <td class="small text-muted">{{ w.from_who|default:"—" }}</td>
         <td class="subject-cell">
             <a href="{% url 'tickets:detail' w.ticket.pk %}" class="text-decoration-none text-dark">{{ w.ticket.subject }}</a>
@@ -516,6 +539,18 @@
 <div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>No open tickets.</div>
 {% else %}
 
+{% if my_open_tickets or assigned_open_tickets %}
+<div class="mb-3">
+    <input type="text" id="open-search" class="form-control form-control-sm" placeholder="Filter by subject…" style="max-width:320px"
+           oninput="
+             var q=this.value.toLowerCase();
+             document.querySelectorAll('.open-ticket-row').forEach(function(r){
+               r.style.display=r.dataset.subject.toLowerCase().includes(q)?'':'none';
+             });
+           ">
+</div>
+{% endif %}
+
 {% if my_open_tickets %}
 <h6 class="text-muted fw-semibold small text-uppercase mb-2 mt-1"><i class="bi bi-person me-1"></i>Mine / Unassigned</h6>
 <div class="table-responsive mb-4">
@@ -531,7 +566,7 @@
     </thead>
     <tbody>
     {% for item in my_open_tickets %}{% with t=item.ticket %}
-    <tr class="{% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
+    <tr class="open-ticket-row {% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}" data-subject="{{ t.subject|lower }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
             {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
@@ -575,7 +610,7 @@
     </thead>
     <tbody>
     {% for item in group.list %}{% with t=item.ticket %}
-    <tr class="{% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}">
+    <tr class="open-ticket-row {% if t.status == 'in_progress' %}table-warning bg-opacity-25{% endif %} priority-{{ t.priority }}" data-subject="{{ t.subject|lower }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
             {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark">Med</span>
