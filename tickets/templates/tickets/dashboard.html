@@ -133,14 +133,14 @@
 }
 .todo-item:last-child { border-bottom:none; }
 .todo-item.overdue { background:#fff5f5; }
-.ticket-card {
-    background:#fff; border:1px solid #dee2e6; border-radius:6px;
-    padding:.5rem .75rem; margin-bottom:.5rem; font-size:.875rem;
+.ticket-row {
+    display:flex; align-items:center; gap:.5rem;
+    padding:.3rem .1rem; border-bottom:1px solid #f0f0f0; font-size:.875rem;
 }
-.ticket-card:last-child { margin-bottom:0; }
-.ticket-card-subject { font-weight:600; color:#212529; text-decoration:none; }
-.ticket-card-subject:hover { color:#0d6efd; }
-.ticket-card-meta { font-size:.75rem; color:#868e96; margin-top:2px; }
+.ticket-row:last-child { border-bottom:none; }
+.ticket-row-subject { font-weight:600; color:#212529; text-decoration:none; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ticket-row-subject:hover { color:#0d6efd; }
+.ticket-row-meta { font-size:.72rem; color:#868e96; white-space:nowrap; flex-shrink:0; }
 </style>
 
 {% if not work_groups_list %}
@@ -215,23 +215,14 @@
   <div>
     {% if group.tickets %}
     {% for row in group.tickets %}{% with t=row.ticket %}
-    <div class="ticket-card">
-        <div class="d-flex align-items-start justify-content-between gap-2">
-            <a href="{% url 'tickets:detail' t.pk %}" class="ticket-card-subject">{{ t.subject }}</a>
-            <div class="d-flex gap-1 flex-shrink-0">
-                {% if t.priority == "high" %}<span class="badge bg-danger" style="font-size:.65rem">High</span>
-                {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark" style="font-size:.65rem">Med</span>
-                {% elif t.priority == "low" %}<span class="badge bg-secondary" style="font-size:.65rem">Low</span>{% endif %}
-                {% if t.status == "in_progress" %}<span class="badge bg-warning text-dark" style="font-size:.65rem">In Progress</span>
-                {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark" style="font-size:.65rem">Ack'd</span>{% endif %}
-            </div>
-        </div>
-        {% if row.latest %}
-        <div class="ticket-card-meta">
-            <i class="bi bi-envelope me-1"></i>{{ row.latest.sender|default:"—" }}
-            &bull; {{ row.latest.received_at|date:"M j, Y" }}
-        </div>
-        {% endif %}
+    <div class="ticket-row">
+        <a href="{% url 'tickets:detail' t.pk %}" class="ticket-row-subject">{{ t.subject }}</a>
+        {% if row.latest %}<span class="ticket-row-meta"><i class="bi bi-envelope me-1"></i>{{ row.latest.sender|default:"—" }} &bull; {{ row.latest.received_at|date:"M j" }}</span>{% endif %}
+        {% if t.priority == "high" %}<span class="badge bg-danger flex-shrink-0" style="font-size:.65rem">High</span>
+        {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark flex-shrink-0" style="font-size:.65rem">Med</span>
+        {% elif t.priority == "low" %}<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">Low</span>{% endif %}
+        {% if t.status == "in_progress" %}<span class="badge bg-warning text-dark flex-shrink-0" style="font-size:.65rem">In Progress</span>
+        {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark flex-shrink-0" style="font-size:.65rem">Ack'd</span>{% endif %}
     </div>
     {% endwith %}{% endfor %}
     {% else %}
