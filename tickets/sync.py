@@ -89,7 +89,7 @@ def _build_email_from_row(ticket, row, namespace=None, conv_id="", known_outlook
             logger.debug("Body fetch failed for %s: %s", short_id, e)
     # Secondary known-check with stable ID — catches emails whose short-form ID
     # changed since last sync
-    if known_outlook_ids is not None and stable_id != short_id and stable_id in known_outlook_ids:
+    if known_outlook_ids is not None and stable_id in known_outlook_ids:
         return None
     received_raw = _row_get(row, "ReceivedTime") or _row_get(row, "SentOn")
     if received_raw is None:
