@@ -119,6 +119,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, known_outlook
         known_outlook_ids = set()
     timings = {}
     emails_by_entry_id = {}  # EntryID -> TicketEmail, deduped in memory
+    table_walked = False     # True once we've successfully iterated the conv table
 
     t0 = time.perf_counter()
     try:
@@ -170,6 +171,7 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, known_outlook
                     emails_by_entry_id[result.outlook_id] = result
                 except Exception as e:
                     logger.warning("Skipping table row: %s", e)
+            table_walked = True
             timings["TableWalk"] = time.perf_counter() - t0
             timings["table_rows"] = table_rows
             timings["skipped_class"] = dict(skipped_class)
@@ -181,8 +183,8 @@ def _collect_conversation_emails(namespace, seed_entry_id, ticket, known_outlook
         logger.warning("GetConversation failed for %s: %s", seed_entry_id, e)
         timings["conv_err"] = str(e)
 
-    # Last resort: at minimum store the seed itself
-    if not emails_by_entry_id:
+    # Last resort: only when the conversation table was never reached (API failure)
+    if not emails_by_entry_id and not table_walked:
         try:
             emails_by_entry_id[seed_entry_id] = _build_email_obj(ticket, seed_item)
             timings["seed_fallback"] = True
