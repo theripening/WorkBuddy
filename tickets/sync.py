@@ -330,7 +330,19 @@ def sync_flagged_emails():
                     tickets_cache[ticket.pk] = ticket
                     new_tickets += 1
 
-                email_objs, timings = _collect_conversation_emails(namespace, entry_id, ticket, known_outlook_ids)
+                email_objs, timings = None, {}
+                for attempt in range(1, 4):  # up to 3 attempts
+                    try:
+                        email_objs, timings = _collect_conversation_emails(namespace, entry_id, ticket, known_outlook_ids)
+                        break
+                    except Exception as com_err:
+                        if attempt < 3:
+                            logger.warning("[%3d/%d] attempt %d failed (%s), retrying in 3s…", idx, len(convs_to_process), attempt, com_err)
+                            time.sleep(3)
+                        else:
+                            raise
+                if email_objs is None:
+                    continue
 
                 # Mark the seed email so we can unflag it later when ticket completes
                 for obj in email_objs:
