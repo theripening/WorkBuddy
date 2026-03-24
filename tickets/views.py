@@ -270,7 +270,11 @@ def ticket_update(request, pk):
     # Ticket completed — unflag in Outlook
     if ticket.status == "completed" and prev_status != "completed":
         try:
-            unflag_ticket_emails(ticket)
+            cleared = unflag_ticket_emails(ticket)
+            if cleared:
+                messages.success(request, f"Ticket completed — {cleared} Outlook flag(s) cleared.")
+            else:
+                messages.warning(request, "Ticket completed but no flagged Outlook emails were found to clear.")
         except Exception as e:
             messages.warning(request, f"Ticket saved but could not unflag Outlook emails: {e}")
 

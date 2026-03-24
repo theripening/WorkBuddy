@@ -565,22 +565,27 @@ def sync_new_flagged():
 def unflag_ticket_emails(ticket):
     """
     Clear the Outlook follow-up flag on all seed emails for the given ticket.
-    Called when a ticket is marked as completed.
+    Falls back to scanning the To-Do folder by conversation_id if no seeds are
+    marked in the DB (handles tickets created before is_seed was reliable).
     Returns the number of emails successfully unflagged.
     """
-    seed_ids = list(ticket.emails.filter(is_seed=True).values_list("outlook_id", flat=True))
-    if not seed_ids:
-        logger.info("Ticket %d: no seed emails to unflag", ticket.pk)
-        return 0
-
     import pythoncom
     import win32com.client
+
+    seed_ids = list(ticket.emails.filter(is_seed=True).values_list("outlook_id", flat=True))
+    known_conv_ids = set(ticket.emails.values_list("conversation_id", flat=True))
+
+    if not seed_ids and not known_conv_ids:
+        logger.info("Ticket %d: no emails in DB, nothing to unflag", ticket.pk)
+        return 0
 
     pythoncom.CoInitialize()
     try:
         outlook = win32com.client.Dispatch("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
         cleared = 0
+
+        # Primary: unflag by stored seed outlook_id
         for outlook_id in seed_ids:
             try:
                 item = namespace.GetItemFromID(outlook_id)
@@ -588,10 +593,31 @@ def unflag_ticket_emails(ticket):
                     item.FlagStatus = OL_FLAG_NOT_FLAGGED
                     item.Save()
                     cleared += 1
-                    logger.debug("Unflagged outlook_id=%s", outlook_id)
+                    logger.debug("Unflagged seed outlook_id=%s", outlook_id)
             except Exception as e:
                 logger.warning("Could not unflag outlook_id=%s: %s", outlook_id, e)
-        logger.info("Ticket %d: unflagged %d/%d seed email(s)", ticket.pk, cleared, len(seed_ids))
+
+        # Fallback: scan To-Do folder for flagged items matching this ticket's conversations
+        if not seed_ids and known_conv_ids:
+            logger.info("Ticket %d: no seeds in DB, scanning To-Do folder by conv_id", ticket.pk)
+            try:
+                todo_folder = namespace.GetDefaultFolder(OL_FOLDER_TODO)
+                mail_todos = todo_folder.Items.Restrict("[MessageClass] = 'IPM.Note'")
+                item = mail_todos.GetFirst()
+                while item is not None:
+                    try:
+                        if item.FlagStatus == OL_FLAG_MARKED and item.ConversationID in known_conv_ids:
+                            item.FlagStatus = OL_FLAG_NOT_FLAGGED
+                            item.Save()
+                            cleared += 1
+                            logger.debug("Unflagged via conv scan: %s", item.ConversationID)
+                    except Exception as e:
+                        logger.debug("Scan item error: %s", e)
+                    item = mail_todos.GetNext()
+            except Exception as e:
+                logger.warning("To-Do folder scan failed: %s", e)
+
+        logger.info("Ticket %d: unflagged %d email(s)", ticket.pk, cleared)
         return cleared
     finally:
         pythoncom.CoUninitialize()
