@@ -79,32 +79,50 @@
 
 .add-form-panel { padding:.55rem .75rem;background:#f8f9fa;border-top:1px solid #e9ecef;display:none; }
 
-/* ── Conversation cards (right) ── */
-.conv-card {
-    background:#fff;border:1px solid #dee2e6;border-radius:6px;
-    margin-bottom:.65rem;overflow:hidden;
-}
-.conv-card:last-child { margin-bottom:0; }
-.conv-header {
+/* ── Conversation rows (right) ── */
+.conv-list { border:1px solid #dee2e6;border-radius:6px;overflow:hidden;background:#fff; }
+.conv-row {
     display:grid;
-    grid-template-columns:1fr auto;
-    align-items:start;
-    padding:.6rem .8rem .35rem;
+    grid-template-columns:1fr auto auto auto;
+    align-items:center;
     gap:.5rem;
+    padding:.45rem .75rem;
+    border-bottom:1px solid #f0f0f0;
+    cursor:pointer;
+    transition:background .1s;
+    font-size:.875rem;
 }
-.conv-sender  { font-weight:600;font-size:.85rem; }
-.conv-subject { font-size:.8rem;color:#495057;margin-top:1px; }
-.conv-date    { font-size:.75rem;color:#868e96;white-space:nowrap; }
-.conv-preview {
-    padding:0 .8rem .55rem;
-    font-size:.8rem;color:#6c757d;line-height:1.5;
-    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+.conv-row:last-of-type { border-bottom:none; }
+.conv-row:hover { background:#f8f9fa; }
+.conv-row.expanded { background:#f0f6ff;border-bottom-color:#c8deff; }
+.conv-subject { font-weight:600;color:#212529;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0; }
+.conv-meta { font-size:.75rem;color:#868e96;white-space:nowrap;flex-shrink:0; }
+
+.conv-expand {
+    display:none;
+    border-bottom:1px solid #f0f0f0;
+    background:#fafcff;
 }
-.conv-footer {
-    display:flex;align-items:center;justify-content:space-between;
-    padding:.35rem .8rem;background:#f8f9fa;border-top:1px solid #f0f0f0;
+.conv-expand.open { display:block; }
+.conv-preview-body {
+    padding:.6rem .75rem;
+    font-size:.8rem;color:#495057;line-height:1.6;
+    white-space:pre-wrap;word-break:break-word;
 }
-.conv-thread-count { font-size:.75rem;color:#868e96; }
+.conv-thread-btn {
+    display:block;margin:.0 .75rem .5rem;
+    font-size:.75rem;color:#0d6efd;background:none;border:none;
+    padding:0;cursor:pointer;text-align:left;
+}
+.conv-thread-btn:hover { text-decoration:underline; }
+
+.thread-email {
+    padding:.5rem .75rem;
+    border-top:1px dashed #dee2e6;
+    background:#fff;
+}
+.thread-email-meta { font-size:.75rem;font-weight:600;color:#495057;margin-bottom:.25rem; }
+.thread-email-preview { font-size:.78rem;color:#6c757d;line-height:1.5;white-space:pre-wrap;word-break:break-word; }
 </style>
 
 {# ── Sticky Header ── #}
@@ -452,38 +470,46 @@
     </div>
 
     {% if threads %}
+    <div class="conv-list">
     {% for thread in threads %}{% with latest=thread.0 %}
-    <div class="conv-card">
-        <div class="conv-header">
-            <div>
-                <div class="conv-sender">{{ latest.sender|default:"Unknown" }}</div>
-                <div class="conv-subject">{{ latest.subject }}</div>
+
+    {# ── Compact row ── #}
+    <div class="conv-row" onclick="convToggle('conv-{{ latest.pk }}', this)">
+        <span class="conv-subject">{{ latest.subject }}</span>
+        <span class="conv-meta">{{ latest.sender|default:"—" }} &bull; {{ latest.received_at|date:"M j, g:i A" }}</span>
+        <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 flex-shrink-0" style="font-size:.75rem"
+                onclick="event.stopPropagation();openTodo('conv-{{ latest.pk }}','todo-email-{{ latest.pk }}',this.closest('.conv-row'))">
+            <i class="bi bi-check2-square me-1"></i>To-Do
+        </button>
+        <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}" onclick="event.stopPropagation()">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+            <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2 flex-shrink-0" style="font-size:.75rem">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Outlook
+            </button>
+        </form>
+    </div>
+
+    {# ── Expandable preview ── #}
+    <div id="conv-{{ latest.pk }}" class="conv-expand">
+        <div class="conv-preview-body">{{ latest.body_preview|default:"(no preview available)" }}</div>
+        {% if thread|length > 1 %}
+        <button class="conv-thread-btn" onclick="togglePanel('thread-{{ latest.pk }}')">
+            <i class="bi bi-chevron-down me-1"></i>Show thread ({{ thread|length }} emails)
+        </button>
+        <div id="thread-{{ latest.pk }}" style="display:none">
+            {% for email in thread|slice:":5" %}
+            <div class="thread-email">
+                <div class="thread-email-meta">
+                    {{ email.sender|default:"Unknown" }} &bull; {{ email.received_at|date:"M j, Y g:i A" }}
+                </div>
+                <div class="thread-email-preview">{{ email.body_preview|default:"(no preview)" }}</div>
             </div>
-            <div class="text-end flex-shrink-0">
-                <div class="conv-date">{{ latest.received_at|date:"M j, Y" }}</div>
-                <div class="conv-date mt-1">{{ latest.received_at|date:"g:i A" }}</div>
-            </div>
+            {% endfor %}
         </div>
-        <div class="conv-preview">{{ latest.body_preview|default:"(no preview available)" }}</div>
-        <div class="conv-footer">
-            <span class="conv-thread-count">
-                <i class="bi bi-chat-text me-1"></i>{{ thread|length }} email{{ thread|length|pluralize }} in thread
-            </span>
-            <div class="d-flex gap-2">
-                <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:.78rem"
-                        onclick="togglePanel('todo-email-{{ latest.pk }}')">
-                    <i class="bi bi-check2-square me-1"></i>+ To-Do
-                </button>
-                <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
-                    <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.78rem">
-                        <i class="bi bi-box-arrow-up-right me-1"></i>Open in Outlook
-                    </button>
-                </form>
-            </div>
-        </div>
-        <div id="todo-email-{{ latest.pk }}" class="add-form-panel">
+        {% endif %}
+        {# Add To-Do inline form #}
+        <div id="todo-email-{{ latest.pk }}" class="add-form-panel" style="border-top:1px solid #dee2e6">
             <form method="post" action="{% url 'tickets:todo_add' ticket.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="thread_email_pk" value="{{ latest.pk }}">
@@ -499,7 +525,9 @@
             </form>
         </div>
     </div>
+
     {% endwith %}{% endfor %}
+    </div>
 
     {% else %}
     <div class="text-center text-muted py-5 bg-white rounded border">
@@ -516,6 +544,23 @@
 function togglePanel(id) {
     const el = document.getElementById(id);
     if (el) el.style.display = el.style.display === 'none' || el.style.display === '' ? 'block' : 'none';
+}
+function convToggle(id, row) {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const open = panel.classList.toggle('open');
+    if (row) row.classList.toggle('expanded', open);
+}
+function openTodo(convId, todoId, row) {
+    // Ensure the conv panel is open first, then show the todo form
+    const panel = document.getElementById(convId);
+    if (panel && !panel.classList.contains('open')) {
+        panel.classList.add('open');
+        if (row) row.classList.add('expanded');
+    }
+    const todo = document.getElementById(todoId);
+    if (todo) todo.style.display = 'block';
+    setTimeout(function(){ if(todo) todo.querySelector('input[name=what]').focus(); }, 50);
 }
 </script>
 
