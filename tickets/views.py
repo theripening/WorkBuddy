@@ -89,10 +89,21 @@ def dashboard(request):
     recent_cutoff = today - timedelta(days=stale_days)
     recent_tickets = []
     seen_recent = set()
-    for email in TicketEmail.objects.filter(received_at__date__gte=recent_cutoff).order_by("-received_at").select_related("ticket"):
+    for email in TicketEmail.objects.filter(received_at__date__gte=recent_cutoff).order_by("-received_at").select_related("ticket__assignee"):
         if email.ticket_id not in seen_recent:
             seen_recent.add(email.ticket_id)
             recent_tickets.append({"ticket": email.ticket, "latest": email})
+    _recent_mine, _recent_assigned = [], {}
+    for row in recent_tickets:
+        a = row["ticket"].assignee
+        if a:
+            _recent_assigned.setdefault(a.name, []).append(row)
+        else:
+            _recent_mine.append(row)
+    recent_groups = [{"label": "Mine", "tickets": _recent_mine}] + [
+        {"label": name, "tickets": rows}
+        for name, rows in sorted(_recent_assigned.items())
+    ]
 
     # --- WAITING ON tab ---
     waiting_items = WaitingOn.objects.filter(resolved=False).select_related("ticket", "thread_email").order_by("expected_date", "asked_date")
@@ -171,6 +182,7 @@ def dashboard(request):
         "my_open_tickets": my_open_tickets,
         "assigned_open_tickets": assigned_open_tickets,
         "recent_tickets": recent_tickets,
+        "recent_groups": recent_groups,
         "waiting_on_list": waiting_on_list,
         "all_tab_data": all_tab_data,
         "form_tickets": form_tickets,

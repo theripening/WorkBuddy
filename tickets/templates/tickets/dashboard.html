@@ -377,9 +377,15 @@
 {% elif active_tab == "recent" %}
 <p class="text-muted small mb-2">Tickets that received new emails in the last <strong>{{ stale_days }} days</strong>.</p>
 {% if recent_tickets %}
-<div class="table-responsive">
+{% for group in recent_groups %}{% if group.tickets %}
+<h6 class="text-muted fw-semibold small text-uppercase mb-1 mt-3">
+    {% if group.label == "Mine" %}<i class="bi bi-person me-1"></i>{% else %}<i class="bi bi-person-badge me-1"></i>{% endif %}
+    {{ group.label }}
+    <span class="badge bg-secondary ms-1" style="font-size:.65rem">{{ group.tickets|length }}</span>
+</h6>
+<div class="table-responsive mb-2">
 <table class="table table-hover table-bordered mb-0" style="font-size:0.875rem">
-    <thead class="table-dark">
+    <thead class="{% if group.label == 'Mine' %}table-dark{% else %}table-secondary{% endif %}">
         <tr>
             <th style="width:80px">Priority</th>
             <th>Subject</th>
@@ -389,7 +395,7 @@
         </tr>
     </thead>
     <tbody>
-    {% for item in recent_tickets %}{% with t=item.ticket %}
+    {% for item in group.tickets %}{% with t=item.ticket %}
     <tr class="priority-{{ t.priority }}">
         <td>
             {% if t.priority == "high" %}<span class="badge bg-danger">High</span>
@@ -413,6 +419,7 @@
     </tbody>
 </table>
 </div>
+{% endif %}{% endfor %}
 {% else %}
 <div class="text-center text-muted py-4"><i class="bi bi-envelope display-4 d-block mb-2"></i>No recent email activity.</div>
 {% endif %}
