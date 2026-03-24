@@ -149,7 +149,13 @@
 
 <div class="mb-3">
     <input type="search" id="work-search" class="form-control form-control-sm" style="max-width:280px" placeholder="Filter tickets…"
-           oninput="var q=this.value.toLowerCase();document.querySelectorAll('.ticket-row').forEach(function(r){r.style.display=r.dataset.subject.includes(q)?'':'none';})">
+           oninput="
+             var q=this.value.toLowerCase();
+             var searching=q.length>0;
+             document.querySelectorAll('.ticket-row').forEach(function(r){r.style.display=r.dataset.subject.includes(q)?'':'none';});
+             document.querySelectorAll('.work-todo-col').forEach(function(c){c.style.display=searching?'none':'';});
+             document.querySelectorAll('.work-grid').forEach(function(g){g.style.gridTemplateColumns=searching?'1fr':'400px 1fr';});
+           ">
 </div>
 
 {% for group in work_groups_list %}
@@ -164,7 +170,7 @@
 
 <div class="work-grid">
   {# ── Left: To-Dos ── #}
-  <div>
+  <div class="work-todo-col">
     {% if group.todos %}
     <div class="todo-card">
         {% for row in group.todos %}{% with item=row.item t=row.item.ticket %}
