@@ -230,6 +230,14 @@
                         {% for w in unresolved_waiting_on %}<option value="{{ w.pk }}">⏳ {{ w.what|truncatechars:28 }}</option>{% endfor %}
                     </select>
                     {% endif %}
+                    {% if threads %}
+                    <select name="thread_email_pk" class="form-select form-select-sm" style="width:200px">
+                        <option value="">No email link</option>
+                        {% for thread in threads %}{% with e=thread.0 %}
+                        <option value="{{ e.pk }}">{{ e.subject|truncatechars:35 }}</option>
+                        {% endwith %}{% endfor %}
+                    </select>
+                    {% endif %}
                     <button type="submit" class="btn btn-primary btn-sm">Save</button>
                 </div>
             </form>
@@ -461,12 +469,33 @@
             <span class="conv-thread-count">
                 <i class="bi bi-chat-text me-1"></i>{{ thread|length }} email{{ thread|length|pluralize }} in thread
             </span>
-            <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
-                <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.78rem">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in Outlook
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:.78rem"
+                        onclick="togglePanel('todo-email-{{ latest.pk }}')">
+                    <i class="bi bi-check2-square me-1"></i>+ To-Do
                 </button>
+                <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'tickets:detail' ticket.pk %}">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.78rem">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Open in Outlook
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div id="todo-email-{{ latest.pk }}" class="add-form-panel">
+            <form method="post" action="{% url 'tickets:todo_add' ticket.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="thread_email_pk" value="{{ latest.pk }}">
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    <input type="text" name="what" class="form-control form-control-sm" required placeholder="What needs to be done?" style="min-width:160px;flex:1">
+                    <select name="assignee" class="form-select form-select-sm" style="width:120px">
+                        <option value="">Me</option>
+                        {% for a in assignees %}<option value="{{ a.pk }}">{{ a.name }}</option>{% endfor %}
+                    </select>
+                    <input type="date" name="due_date" class="form-control form-control-sm" style="width:140px">
+                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                </div>
             </form>
         </div>
     </div>
