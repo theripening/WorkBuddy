@@ -316,7 +316,7 @@ def todo_add(request, pk):
         email_pk = request.POST.get("thread_email_pk", "").strip()
         thread_email = TicketEmail.objects.filter(pk=email_pk).first() if email_pk else None
         waiting_on_raw = request.POST.get("waiting_on", "").strip()
-        TodoItem.objects.create(
+        todo = TodoItem.objects.create(
             ticket=ticket,
             thread_email=thread_email,
             assignee_id=int(assignee_raw) if assignee_raw else None,
@@ -324,15 +324,21 @@ def todo_add(request, pk):
             due_date=due_raw if due_raw else None,
             waiting_on_id=int(waiting_on_raw) if waiting_on_raw else None,
         )
+        if ticket.assignee and ticket.assignee.email:
+            from .cloud import push_todo
+            push_todo(ticket, todo)
     return redirect("tickets:detail", pk=pk)
 
 
 @require_POST
 def todo_done(request, item_pk):
-    item = get_object_or_404(TodoItem, pk=item_pk)
+    item = get_object_or_404(TodoItem.objects.select_related("ticket__assignee"), pk=item_pk)
     item.done = True
     item.done_at = timezone.now()
     item.save()
+    if item.ticket.assignee and item.ticket.assignee.email:
+        from .cloud import complete_todo
+        complete_todo(item)
     from django.http import HttpResponseRedirect
     next_url = request.POST.get("next") or f"/tickets/{item.ticket_id}/"
     return HttpResponseRedirect(next_url)
@@ -368,22 +374,28 @@ def waiting_on_add(request, pk):
         expected_raw = request.POST.get("expected_date", "").strip()
         email_pk = request.POST.get("thread_email_pk", "").strip()
         thread_email = TicketEmail.objects.filter(pk=email_pk).first() if email_pk else None
-        WaitingOn.objects.create(
+        waiting = WaitingOn.objects.create(
             ticket=ticket,
             thread_email=thread_email,
             what=what,
             from_who=from_who,
             expected_date=expected_raw if expected_raw else None,
         )
+        if ticket.assignee and ticket.assignee.email:
+            from .cloud import push_waiting
+            push_waiting(ticket, waiting)
     return redirect("tickets:detail", pk=pk)
 
 
 @require_POST
 def waiting_on_resolve(request, item_pk):
-    item = get_object_or_404(WaitingOn, pk=item_pk)
+    item = get_object_or_404(WaitingOn.objects.select_related("ticket__assignee"), pk=item_pk)
     item.resolved = True
     item.resolved_at = timezone.now().date()
     item.save()
+    if item.ticket.assignee and item.ticket.assignee.email:
+        from .cloud import resolve_waiting
+        resolve_waiting(item)
     return redirect("tickets:detail", pk=item.ticket_id)
 
 

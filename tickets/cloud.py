@@ -182,6 +182,85 @@ def pull_cloud_notes(my_email):
     return list(seen.values())
 
 
+def push_todo(ticket, todo):
+    """Push a todo item to WorkBuddyCloud."""
+    url = _base_url()
+    if not url:
+        return
+    conv_id = _conv_id_for_ticket(ticket)
+    if not conv_id:
+        return
+    try:
+        r = requests.post(
+            f"{url}/api/tickets/{conv_id}/todos/",
+            json={"external_id": todo.pk, "text": todo.what},
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        logger.info("Pushed todo %d to cloud (ticket %d)", todo.pk, ticket.pk)
+    except Exception as e:
+        logger.warning("Cloud push_todo failed for todo %d: %s", todo.pk, e)
+
+
+def complete_todo(todo):
+    """Mark a cloud todo as completed."""
+    url = _base_url()
+    if not url:
+        return
+    try:
+        r = requests.post(
+            f"{url}/api/todos/{todo.pk}/complete/",
+            json={"completed_by": "assigner"},
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        logger.info("Completed cloud todo %d", todo.pk)
+    except Exception as e:
+        logger.warning("Cloud complete_todo failed for todo %d: %s", todo.pk, e)
+
+
+def push_waiting(ticket, waiting):
+    """Push a waiting-on item to WorkBuddyCloud."""
+    url = _base_url()
+    if not url:
+        return
+    conv_id = _conv_id_for_ticket(ticket)
+    if not conv_id:
+        return
+    try:
+        r = requests.post(
+            f"{url}/api/tickets/{conv_id}/waiting/",
+            json={
+                "external_id": waiting.pk,
+                "what": waiting.what,
+                "from_who": waiting.from_who,
+                "expected_date": waiting.expected_date.isoformat() if waiting.expected_date else None,
+            },
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        logger.info("Pushed waiting %d to cloud (ticket %d)", waiting.pk, ticket.pk)
+    except Exception as e:
+        logger.warning("Cloud push_waiting failed for waiting %d: %s", waiting.pk, e)
+
+
+def resolve_waiting(waiting):
+    """Mark a cloud waiting-on as resolved."""
+    url = _base_url()
+    if not url:
+        return
+    try:
+        r = requests.post(
+            f"{url}/api/waiting/{waiting.pk}/resolve/",
+            json={},
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        logger.info("Resolved cloud waiting %d", waiting.pk)
+    except Exception as e:
+        logger.warning("Cloud resolve_waiting failed for waiting %d: %s", waiting.pk, e)
+
+
 def sync_cloud_notes(my_email):
     """
     Pull cloud tickets and store any new notes locally as CloudNote records.
