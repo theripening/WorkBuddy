@@ -85,7 +85,7 @@ def forward_to_assignee(ticket, assignee_email):
 # Cloud API calls
 # ---------------------------------------------------------------------------
 
-def push_ticket(ticket, assignee_email, my_email):
+def push_ticket(ticket, assignee_email, my_email=""):
     """
     Create or update a shared ticket on WorkBuddyCloud.
     Called when a ticket is assigned.

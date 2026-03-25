@@ -101,8 +101,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STALE_DAYS = 7
 
 # WorkBuddyCloud shared ticket API (Phase 2 — optional).
-# Set to your WorkBuddyCloud server URL to enable cloud sync.
-# e.g. WORKBUDDY_CLOUD_URL = "http://192.168.1.50:8765"
+# Point at the EBPP_INFOTOOLS server including the /workbuddy prefix:
+#   WORKBUDDY_CLOUD_URL = "http://192.168.1.50:8000/workbuddy"
+# API calls resolve as {WORKBUDDY_CLOUD_URL}/api/tickets/ etc.
 # Leave as None to run in local-only mode (no cloud calls made).
 WORKBUDDY_CLOUD_URL = None
 
