@@ -14,12 +14,45 @@ def _priority_sort(p):
     return PRIORITY_ORDER.get(p, 3)
 
 
+def _ticket_row(t, assignee_email=None):
+    """Build the enriched row dict used by the Work tab split-panel."""
+    subject = t.subject or ""
+    if " | " in subject:
+        parts = subject.split(" | ", 1)
+        client_code = parts[0].strip()
+        subject_display = parts[1].strip()
+    else:
+        client_code = ""
+        subject_display = subject
+    latest = t.latest_email()
+    open_todo_count = sum(1 for x in t.todos.all() if not x.done)
+    open_waiting_count = sum(1 for x in t.waiting_on.all() if not x.resolved)
+    has_reply = bool(
+        latest and assignee_email
+        and latest.sender
+        and latest.sender.lower() != assignee_email.lower()
+    )
+    all_emails = list(t.emails.all())
+    recent_emails = sorted(all_emails, key=lambda e: e.received_at, reverse=True)[:5]
+    return {
+        "ticket": t,
+        "latest": latest,
+        "client_code": client_code,
+        "subject_display": subject_display,
+        "open_todo_count": open_todo_count,
+        "open_waiting_count": open_waiting_count,
+        "has_reply": has_reply,
+        "recent_emails": recent_emails,
+        "email_count": len(all_emails),
+    }
+
+
 def dashboard(request):
     today = timezone.now().date()
     stale_days = getattr(settings, "STALE_DAYS", 7)
     stale_cutoff = today - timedelta(days=stale_days)
 
-    all_tickets = Ticket.objects.prefetch_related("emails", "waiting_on", "todos")
+    all_tickets = Ticket.objects.prefetch_related("emails", "waiting_on", "todos", "todos__waiting_on")
 
     # --- Stat card counts ---
     overdue_count = TodoItem.objects.filter(done=False, due_date__lt=today).count()
@@ -117,32 +150,29 @@ def dashboard(request):
         })
 
     # --- OPEN tab ---
-    _open_qs = all_tickets.filter(status__in=["acknowledged", "in_progress"])
+    _open_qs = all_tickets.filter(status__in=["created", "acknowledged", "in_progress"])
     my_open_tickets = [
-        {"ticket": t, "latest": t.latest_email()}
+        _ticket_row(t)
         for t in _open_qs.filter(assignee__isnull=True).order_by("subject")
     ]
     assigned_open_tickets = sorted(
-        [{"ticket": t, "latest": t.latest_email()} for t in _open_qs.filter(assignee__isnull=False)],
+        [_ticket_row(t, t.assignee.email) for t in _open_qs.filter(assignee__isnull=False)],
         key=lambda x: (x["ticket"].assignee.name.lower(), x["ticket"].subject.lower() if x["ticket"].subject else ""),
     )
 
     open_count = len(my_open_tickets)
     team_open_count = len(assigned_open_tickets)
 
-    # --- WORK tab: todos + open tickets grouped by person ---
+    # --- WORK tab: ticket list grouped by person (todos live inside the panel) ---
     from collections import defaultdict
-    _team_todos_by = defaultdict(list)
-    for row in team_todos:
-        _team_todos_by[row["item"].assignee.name].append(row)
     _team_tickets_by = defaultdict(list)
     for row in assigned_open_tickets:
         _team_tickets_by[row["ticket"].assignee.name].append(row)
-    _all_names = sorted(set(list(_team_todos_by.keys()) + list(_team_tickets_by.keys())))
-    work_groups_list = [{"label": "Mine", "todos": my_todos, "tickets": my_open_tickets}] + [
-        {"label": name, "todos": _team_todos_by[name], "tickets": _team_tickets_by[name]}
-        for name in _all_names
+    work_groups_list = [{"label": "Mine", "tickets": my_open_tickets}] + [
+        {"label": name, "tickets": _team_tickets_by[name]}
+        for name in sorted(_team_tickets_by.keys())
     ]
+    work_ticket_total = len(my_open_tickets) + len(assigned_open_tickets)
 
 
     # --- ALL tab ---
@@ -159,7 +189,8 @@ def dashboard(request):
         ).distinct()
     all_tab_data = [{"ticket": t, "latest": t.latest_email()} for t in all_tab]
 
-    form_pks = {x["ticket"].pk for x in all_tab_data} | {x["ticket"].pk for x in triage_tickets}
+    work_pks = {x["ticket"].pk for x in my_open_tickets} | {x["ticket"].pk for x in assigned_open_tickets}
+    form_pks = {x["ticket"].pk for x in all_tab_data} | {x["ticket"].pk for x in triage_tickets} | work_pks
     form_tickets = Ticket.objects.filter(pk__in=form_pks).select_related("assignee")
 
     active_tab = request.GET.get("tab", "todo")
@@ -175,6 +206,7 @@ def dashboard(request):
         "open_count": open_count,
         "team_open_count": team_open_count,
         "work_groups_list": work_groups_list,
+        "work_ticket_total": work_ticket_total,
         "my_todos": my_todos,
         "team_todos": team_todos,
         "stale_tickets": stale_tickets,
@@ -239,6 +271,7 @@ def ticket_update(request, pk):
     from .sync import unflag_ticket_emails
     from .cloud import forward_to_assignee, push_ticket, push_status
     ticket = get_object_or_404(Ticket, pk=pk)
+    prev_subject = ticket.subject
     ticket.subject = request.POST.get("subject", ticket.subject) or ticket.subject
     prev_assignee_id = ticket.assignee_id
     assignee_raw = request.POST.get("assignee", "")
@@ -259,6 +292,13 @@ def ticket_update(request, pk):
                     push_ticket(ticket, assignee_email, my_email)
             except Exception as e:
                 messages.warning(request, f"Ticket saved but could not forward to assignee: {e}")
+
+    # Subject changed — push updated subject to cloud
+    if ticket.subject != prev_subject and ticket.assignee_id and ticket.assignee and ticket.assignee.email:
+        try:
+            push_ticket(ticket, ticket.assignee.email)
+        except Exception:
+            pass
 
     # Status changed — push to cloud
     if ticket.status != prev_status:

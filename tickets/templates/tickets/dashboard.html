@@ -79,8 +79,7 @@
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'todo' %}active fw-semibold{% endif %}" href="?tab=todo">
             <i class="bi bi-check2-square me-1"></i>Work
-            {% if my_todos %}<span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ my_todos|length }} todo{{ my_todos|length|pluralize }}</span>{% endif %}
-            {% if open_count %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">{{ open_count }} open</span>{% endif %}
+            {% if work_ticket_total %}<span class="badge bg-primary ms-1" style="font-size:0.65rem">{{ work_ticket_total }}</span>{% endif %}
         </a>
     </li>
     <li class="nav-item">
@@ -117,135 +116,432 @@
 
 <div class="bg-white border border-top-0 rounded-bottom shadow-sm p-3">
 
-{# ── WORK TAB (To-Dos + Open Tickets by person) ── #}
+{# ── WORK TAB: split-panel ticket list ── #}
 {% if active_tab == "todo" %}
 
 <style>
-.work-grid { display:grid; grid-template-columns:400px 1fr; gap:1rem; align-items:start; margin-bottom:1.5rem; }
-.work-section-header {
-    font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
-    color:#6c757d; padding:.25rem 0 .5rem; border-bottom:2px solid #dee2e6; margin-bottom:.75rem;
+.wb-split {
+  display:grid; grid-template-columns:1fr 0px;
+  height:calc(100vh - 230px); min-height:480px;
+  overflow:hidden; margin:-1rem;
+  border-radius:0 0 .375rem .375rem;
+  transition:grid-template-columns .2s ease;
 }
-.todo-card { background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; overflow:hidden; }
-.todo-item {
-    display:grid; grid-template-columns:28px 1fr; gap:4px; align-items:start;
-    padding:.45rem .6rem; border-bottom:1px solid #eee; font-size:.875rem;
-}
-.todo-item:last-child { border-bottom:none; }
-.todo-item.overdue { background:#fff5f5; }
-.ticket-row {
-    display:flex; align-items:center; gap:.5rem;
-    padding:.3rem .1rem; border-bottom:1px solid #f0f0f0; font-size:.875rem;
-}
-.ticket-row:last-child { border-bottom:none; }
-.ticket-row-subject { font-weight:600; color:#212529; text-decoration:none; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.ticket-row-subject:hover { color:#0d6efd; }
-.ticket-row-meta { font-size:.72rem; color:#868e96; white-space:nowrap; flex-shrink:0; }
+.wb-split.panel-open { grid-template-columns:400px 1fr; }
+.wb-list { display:flex; flex-direction:column; overflow:hidden; border-right:1px solid #e5e7eb; background:#fff; }
+.wb-toolbar { flex-shrink:0; display:flex; align-items:center; gap:.4rem; padding:.5rem .75rem; border-bottom:1px solid #f3f4f6; }
+.wb-sw { position:relative; flex:1; }
+.wb-sw input { width:100%; padding-left:1.8rem; font-size:0.79rem; border-radius:20px; border:1px solid #e5e7eb; height:28px; background:#f9fafb; }
+.wb-sw input:focus { outline:none; border-color:#93c5fd; background:#fff; }
+.wb-sw .bi { position:absolute; left:.6rem; top:50%; transform:translateY(-50%); color:#9ca3af; font-size:0.75rem; pointer-events:none; }
+.wb-fpill { display:inline-flex; align-items:center; gap:3px; font-size:0.72rem; border-radius:20px; padding:2px 8px; height:26px; border:1px solid #e5e7eb; background:#fff; cursor:pointer; user-select:none; color:#6b7280; white-space:nowrap; flex-shrink:0; }
+.wb-fpill:hover { border-color:#9ca3af; }
+.wb-fpill.on { background:#2563eb; border-color:#2563eb; color:#fff; }
+.wb-scroll { flex:1; overflow-y:auto; }
+.wb-sec { padding:3px 10px; font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:#9ca3af; background:#f9fafb; border-bottom:1px solid #f0f0f0; display:flex; align-items:center; gap:5px; position:sticky; top:0; z-index:1; }
+.wb-trow { display:flex; align-items:center; padding:6px 10px; gap:6px; cursor:pointer; border-bottom:1px solid #f3f4f6; border-left:3px solid transparent; transition:background .08s; }
+.wb-trow:hover { background:#f8faff; }
+.wb-trow.active { background:#eff6ff; border-left-color:#2563eb; }
+.wb-t-client { font-size:0.63rem; font-weight:700; color:#9ca3af; white-space:nowrap; flex-shrink:0; min-width:32px; }
+.wb-t-subject { font-size:0.81rem; font-weight:500; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
+.wb-trow.active .wb-t-subject { font-weight:600; color:#1d4ed8; }
+.wb-rbadges { display:flex; gap:3px; flex-shrink:0; }
+.wb-rb { font-size:0.63rem; padding:1px 5px; border-radius:10px; font-weight:600; white-space:nowrap; line-height:1.6; }
+.wb-rb-todo    { background:#ede9fe; color:#5b21b6; }
+.wb-rb-waiting { background:#fff7ed; color:#c2410c; }
+.wb-rb-reply   { background:#ecfdf5; color:#065f46; }
+.wb-pbadge { font-size:0.63rem; padding:1px 5px; border-radius:4px; font-weight:600; flex-shrink:0; }
+.wb-p-critical,.wb-p-high { background:#fee2e2; color:#991b1b; }
+.wb-p-medium   { background:#fef3c7; color:#92400e; }
+.wb-p-low      { background:#dbeafe; color:#1e40af; }
+.wb-sbadge { font-size:0.63rem; padding:1px 5px; border-radius:4px; flex-shrink:0; }
+.wb-s-ip  { background:#dbeafe; color:#1d4ed8; }
+.wb-s-ack { background:#f1f5f9; color:#475569; }
+.wb-detail { overflow-y:auto; background:#f0f2f5; padding:.75rem; opacity:0; transition:opacity .15s ease .05s; }
+.wb-split.panel-open .wb-detail { opacity:1; }
+.wb-dheader { background:#fff; border:1px solid #e5e7eb; border-radius:7px; padding:.65rem .85rem; margin-bottom:.6rem; display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem; }
+.wb-dsubject { font-size:.95rem; font-weight:700; color:#111827; line-height:1.3; }
+.wb-dmeta { font-size:0.72rem; color:#9ca3af; margin-top:3px; }
+.wb-pc { border:none; background:none; color:#9ca3af; font-size:1rem; cursor:pointer; flex-shrink:0; padding:0; line-height:1; }
+.wb-pc:hover { color:#374151; }
+.wb-dsec { background:#fff; border:1px solid #e5e7eb; border-radius:7px; margin-bottom:.6rem; overflow:hidden; }
+.wb-dsh { padding:5px 10px; font-size:0.72rem; font-weight:700; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; gap:5px; color:#374151; }
+.wb-dsb { padding:.4rem .6rem; }
+.wb-tdi { display:flex; align-items:center; gap:6px; padding:4px 2px; border-bottom:1px solid #f9fafb; font-size:0.79rem; }
+.wb-tdi:last-child { border-bottom:none; }
+.wb-tdi.done .wb-tdl { text-decoration:line-through; color:#9ca3af; }
+.wb-tdi input[type=checkbox] { width:13px; height:13px; flex-shrink:0; accent-color:#4f46e5; cursor:pointer; }
+.wb-td-blocked { font-size:0.67rem; color:#ea580c; margin-left:auto; white-space:nowrap; }
+.wb-td-meta    { font-size:0.67rem; color:#9ca3af; margin-left:auto; white-space:nowrap; }
+.wb-wti { display:flex; align-items:center; gap:6px; padding:4px 2px; border-bottom:1px solid #f9fafb; font-size:0.79rem; }
+.wb-wti:last-child { border-bottom:none; }
+.wb-wti.resolved .wb-wtxt { text-decoration:line-through; color:#9ca3af; }
+.wb-wtmeta { font-size:0.68rem; color:#9ca3af; }
+.wb-wtod { color:#dc2626; font-weight:600; }
+.wb-wtr { border:none; background:none; font-size:0.72rem; color:#9ca3af; cursor:pointer; margin-left:auto; padding:1px 4px; border-radius:4px; white-space:nowrap; flex-shrink:0; }
+.wb-wtr:hover { background:#dcfce7; color:#16a34a; }
+.wb-ci { display:flex; align-items:flex-start; gap:7px; padding:5px 2px; border-bottom:1px solid #f9fafb; }
+.wb-ci:last-child { border-bottom:none; }
+.wb-cdot { width:7px; height:7px; border-radius:50%; flex-shrink:0; margin-top:5px; }
+.wb-cdot.latest { background:#2563eb; }
+.wb-cdot.older  { background:#e5e7eb; }
+.wb-csender { font-size:0.78rem; font-weight:600; color:#111827; }
+.wb-cdate   { font-size:0.68rem; color:#9ca3af; }
+.wb-cprev   { font-size:0.72rem; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wb-det-link { font-size:0.72rem; color:#6b7280; text-decoration:none; }
+.wb-det-link:hover { color:#2563eb; }
 </style>
 
-{% if not work_groups_list %}
+{% if not work_ticket_total %}
 <div class="text-center text-muted py-4"><i class="bi bi-check2-all display-4 d-block mb-2"></i>Nothing open. You're on top of it.</div>
 {% else %}
 
-<div class="mb-3">
-    <input type="search" id="work-search" class="form-control form-control-sm" style="max-width:280px" placeholder="Filter tickets…"
-           oninput="
-             var q=this.value.toLowerCase();
-             var searching=q.length>0;
-             document.querySelectorAll('.ticket-row').forEach(function(r){r.style.display=r.dataset.subject.includes(q)?'':'none';});
-             document.querySelectorAll('.work-todo-col').forEach(function(c){c.style.display=searching?'none':'';});
-             document.querySelectorAll('.work-grid').forEach(function(g){g.style.gridTemplateColumns=searching?'1fr':'400px 1fr';});
-           ">
-</div>
+<div class="wb-split" id="wbSplit">
 
-{% for group in work_groups_list %}
-{% if group.todos or group.tickets %}
-
-<div class="work-section-header">
-    {% if group.label == "Mine" %}<i class="bi bi-person me-1"></i>{% else %}<i class="bi bi-person-badge me-1"></i>{% endif %}
-    {{ group.label }}
-    {% if group.todos %}<span class="badge bg-primary ms-2" style="font-size:.65rem">{{ group.todos|length }} todo{{ group.todos|length|pluralize }}</span>{% endif %}
-    {% if group.tickets %}<span class="badge bg-info text-dark ms-1" style="font-size:.65rem">{{ group.tickets|length }} open ticket{{ group.tickets|length|pluralize }}</span>{% endif %}
-</div>
-
-<div class="work-grid">
-  {# ── Left: To-Dos ── #}
-  <div class="work-todo-col">
-    {% if group.todos %}
-    <div class="todo-card">
-        {% for row in group.todos %}{% with item=row.item t=row.item.ticket %}
-        <div class="todo-item {% if row.overdue %}overdue{% endif %}">
-            <div class="pt-1">
-                <form method="post" action="{% url 'tickets:todo_done' item.pk %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="next" value="/?tab=todo">
-                    <button type="submit" class="btn btn-sm btn-outline-success p-0" style="width:22px;height:22px;line-height:1" title="Mark done">
-                        <i class="bi bi-check-lg" style="font-size:.75rem"></i>
-                    </button>
-                </form>
-            </div>
-            <div>
-                <form method="post" action="{% url 'tickets:todo_update' item.pk %}" id="todo-asgn-{{ item.pk }}">
-                    {% csrf_token %}
-                    <input type="hidden" name="next" value="/?tab=todo">
-                </form>
-                <input type="text" name="what" form="todo-asgn-{{ item.pk }}"
-                       value="{{ item.what }}"
-                       class="form-control form-control-sm border-0 bg-transparent px-0 fw-semibold"
-                       onblur="document.getElementById('todo-asgn-{{ item.pk }}').submit()"
-                       style="padding:0">
-                {% if row.blocked %}<span class="badge bg-warning text-dark" style="font-size:.6rem">⏳ blocked</span>{% endif %}
-                <div style="font-size:.75rem;color:#868e96;margin-top:2px;">
-                    <a href="{% url 'tickets:detail' t.pk %}" class="text-muted text-decoration-none">{{ t.subject|truncatechars:40 }}</a>
-                    {% if item.due_date %}
-                    &bull; <span class="{% if row.overdue %}text-danger fw-semibold{% endif %}">
-                        {% if row.overdue %}<i class="bi bi-exclamation-triangle"></i> {% endif %}{{ item.due_date|date:"M j" }}
-                    </span>
-                    {% endif %}
-                    &bull;
-                    <select name="assignee" form="todo-asgn-{{ item.pk }}"
-                            class="border-0 bg-transparent p-0 text-muted"
-                            style="font-size:.75rem;cursor:pointer"
-                            onchange="document.getElementById('todo-asgn-{{ item.pk }}').submit()">
-                        <option value="">— me —</option>
-                        {% for a in assignees %}
-                        <option value="{{ a.pk }}" {% if item.assignee_id == a.pk %}selected{% endif %}>{{ a.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
+  {# ── List pane ── #}
+  <div class="wb-list">
+    <div class="wb-toolbar">
+      <div class="wb-sw">
+        <i class="bi bi-search"></i>
+        <input type="text" id="wbSearch" placeholder="Filter tickets…" oninput="wbApplyFilters()">
+      </div>
+      <button class="wb-fpill" id="wbFTodo" onclick="wbToggleFilter(this)"><i class="bi bi-check2-square"></i> Todo</button>
+      <button class="wb-fpill" id="wbFWait" onclick="wbToggleFilter(this)"><i class="bi bi-hourglass-split"></i> Waiting</button>
+      <button class="wb-fpill" id="wbFReply" onclick="wbToggleFilter(this)"><i class="bi bi-reply"></i> Reply</button>
+    </div>
+    <div class="wb-scroll">
+      {% for group in work_groups_list %}{% if group.tickets %}
+      <div class="wb-sec">
+        {% if group.label == "Mine" %}<i class="bi bi-person-fill"></i> Mine
+        {% else %}<i class="bi bi-person-badge"></i> {{ group.label }}{% endif %}
+      </div>
+      {% for row in group.tickets %}{% with t=row.ticket %}
+      <div class="wb-trow"
+           data-pk="{{ t.pk }}"
+           data-todo="{{ row.open_todo_count|yesno:'1,0' }}"
+           data-waiting="{{ row.open_waiting_count|yesno:'1,0' }}"
+           data-reply="{{ row.has_reply|yesno:'1,0' }}"
+           data-open-todo-count="{{ row.open_todo_count }}"
+           data-open-wait-count="{{ row.open_waiting_count }}"
+           data-subject="{{ row.client_code|lower }} {{ t.subject|lower }}"
+           onclick="wbOpenTicket({{ t.pk }})">
+        <span class="wb-t-client">{{ row.client_code }}</span>
+        <span class="wb-t-subject">{{ row.subject_display }}</span>
+        <div class="wb-rbadges">
+          {% if row.open_todo_count > 0 %}<span class="wb-rb wb-rb-todo" id="wb-rb-todo-{{ t.pk }}"><i class="bi bi-check2-square"></i> {{ row.open_todo_count }}</span>{% endif %}
+          {% if row.open_waiting_count > 0 %}<span class="wb-rb wb-rb-waiting" id="wb-rb-wait-{{ t.pk }}"><i class="bi bi-hourglass-split"></i> {{ row.open_waiting_count }}</span>{% endif %}
+          {% if row.has_reply %}<span class="wb-rb wb-rb-reply"><i class="bi bi-reply-fill"></i> Reply</span>{% endif %}
         </div>
-        {% endwith %}{% endfor %}
+        {% if t.priority == "critical" %}<span class="wb-pbadge wb-p-critical">Crit</span>
+        {% elif t.priority == "high" %}<span class="wb-pbadge wb-p-high">High</span>
+        {% elif t.priority == "medium" %}<span class="wb-pbadge wb-p-medium">Med</span>
+        {% elif t.priority == "low" %}<span class="wb-pbadge wb-p-low">Low</span>{% endif %}
+        {% if t.status == "in_progress" %}<span class="wb-sbadge wb-s-ip">In Progress</span>
+        {% elif t.status == "acknowledged" %}<span class="wb-sbadge wb-s-ack">Ack'd</span>{% endif %}
+      </div>
+      {% endwith %}{% endfor %}
+      {% endif %}{% endfor %}
     </div>
-    {% else %}
-    <div class="text-muted small fst-italic px-1">No to-dos.</div>
-    {% endif %}
   </div>
 
-  {# ── Right: Open Tickets ── #}
-  <div>
-    {% if group.tickets %}
-    {% for row in group.tickets %}{% with t=row.ticket %}
-    <div class="ticket-row" data-subject="{{ t.subject|lower }}">
-        <a href="{% url 'tickets:detail' t.pk %}" class="ticket-row-subject">{{ t.subject }}</a>
-        {% if row.latest %}<span class="ticket-row-meta"><i class="bi bi-envelope me-1"></i>{{ row.latest.sender|default:"—" }} &bull; {{ row.latest.received_at|date:"M j" }}</span>{% endif %}
-        {% if t.priority == "high" %}<span class="badge bg-danger flex-shrink-0" style="font-size:.65rem">High</span>
-        {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark flex-shrink-0" style="font-size:.65rem">Med</span>
-        {% elif t.priority == "low" %}<span class="badge bg-secondary flex-shrink-0" style="font-size:.65rem">Low</span>{% endif %}
-        {% if t.status == "in_progress" %}<span class="badge bg-warning text-dark flex-shrink-0" style="font-size:.65rem">In Progress</span>
-        {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark flex-shrink-0" style="font-size:.65rem">Ack'd</span>{% endif %}
+  {# ── Detail pane ── #}
+  <div class="wb-detail" id="wbDetail">
+    <div id="wbd-empty" class="text-center text-muted py-5" style="font-size:0.85rem">
+      <i class="bi bi-arrow-left-circle display-5 d-block mb-2 text-secondary"></i>
+      Select a ticket to view details
     </div>
-    {% endwith %}{% endfor %}
-    {% else %}
-    <div class="text-muted small fst-italic px-1">No open tickets.</div>
-    {% endif %}
+
+    {% for group in work_groups_list %}{% for row in group.tickets %}{% with t=row.ticket %}
+    <div id="wbd-{{ t.pk }}" style="display:none">
+
+      <div class="wb-dheader">
+        <div style="min-width:0">
+          <div class="wb-dsubject" contenteditable="true" id="wb-subj-{{ t.pk }}"
+               data-orig="{{ t.subject }}"
+               title="Click to edit subject"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+               onblur="wbSaveSubject({{ t.pk }}, this)"
+               style="cursor:text;outline:none;border-bottom:1px dashed #d1d5db">{% if row.client_code %}{{ row.client_code }} | {% endif %}{{ row.subject_display }}</div>
+          <div class="wb-dmeta">
+            {% if t.priority == "critical" %}<span class="badge bg-danger me-1" style="font-size:.62rem">Critical</span>
+            {% elif t.priority == "high" %}<span class="badge bg-danger me-1" style="font-size:.62rem">High</span>
+            {% elif t.priority == "medium" %}<span class="badge bg-warning text-dark me-1" style="font-size:.62rem">Med</span>
+            {% elif t.priority == "low" %}<span class="badge bg-secondary me-1" style="font-size:.62rem">Low</span>{% endif %}
+            {% if t.status == "in_progress" %}<span class="badge bg-primary me-1" style="font-size:.62rem">In Progress</span>
+            {% elif t.status == "acknowledged" %}<span class="badge bg-info text-dark me-1" style="font-size:.62rem">Acknowledged</span>
+            {% elif t.status == "created" %}<span class="badge bg-secondary me-1" style="font-size:.62rem">Created</span>{% endif %}
+            <strong>{{ t.assignee.name|default:"Me" }}</strong> · {{ t.updated_at|date:"M j, Y" }}
+            &nbsp;<a href="{% url 'tickets:detail' t.pk %}" class="wb-det-link"><i class="bi bi-box-arrow-up-right"></i> Open full</a>
+          </div>
+        </div>
+        <button class="wb-pc" onclick="wbClosePanel()"><i class="bi bi-x-lg"></i></button>
+      </div>
+
+      <div class="wb-dsec">
+        <div class="wb-dsh">
+          <i class="bi bi-check2-square text-primary"></i> To-Dos
+          <span class="badge bg-primary ms-auto" style="font-size:.6rem" id="wbd-todo-badge-{{ t.pk }}">{{ row.open_todo_count }} open</span>
+        </div>
+        <div class="wb-dsb">
+          {% for todo in t.todos.all %}
+          <div class="wb-tdi{% if todo.done %} done{% endif %}" id="wbtdi-{{ todo.pk }}">
+            <input type="checkbox" {% if todo.done %}checked disabled{% endif %}
+                   data-todo-pk="{{ todo.pk }}"
+                   data-ticket-pk="{{ t.pk }}"
+                   data-url="{% url 'tickets:todo_done' todo.pk %}"
+                   onchange="wbTodoDone(this)">
+            <span class="wb-tdl">{{ todo.what }}</span>
+            {% if todo.done %}
+              <span class="wb-td-meta">Done{% if todo.done_at %} {{ todo.done_at|date:"M j" }}{% endif %}</span>
+            {% elif todo.waiting_on_id and not todo.waiting_on.resolved %}
+              <span class="wb-td-blocked"><i class="bi bi-slash-circle"></i> blocked</span>
+            {% elif todo.due_date %}
+              <span class="wb-td-meta{% if todo.due_date < today %} text-danger fw-semibold{% endif %}">
+                {% if todo.due_date < today %}<i class="bi bi-exclamation-triangle"></i> {% endif %}{{ todo.due_date|date:"M j" }}
+              </span>
+            {% endif %}
+          </div>
+          {% endfor %}
+          <form method="post" action="{% url 'tickets:todo_add' t.pk %}" class="d-flex gap-1 mt-2">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="/?tab=todo&reopen={{ t.pk }}">
+            <input type="text" name="what" class="form-control form-control-sm" placeholder="Add to-do…" style="font-size:0.78rem" autocomplete="off">
+            <button type="submit" class="btn btn-sm btn-outline-primary px-2 py-0 flex-shrink-0">+ Add</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="wb-dsec">
+        <div class="wb-dsh">
+          <i class="bi bi-hourglass-split text-warning"></i> Waiting On
+          <span class="badge bg-warning text-dark ms-auto" style="font-size:.6rem" id="wbd-wait-badge-{{ t.pk }}">{{ row.open_waiting_count }} open</span>
+        </div>
+        <div class="wb-dsb">
+          {% for w in t.waiting_on.all %}
+          <div class="wb-wti{% if w.resolved %} resolved{% endif %}" id="wbwti-{{ w.pk }}">
+            <div style="flex:1;min-width:0">
+              <div class="wb-wtxt">{{ w.what }}</div>
+              <div class="wb-wtmeta">
+                {% if w.from_who %}From {{ w.from_who }}{% endif %}
+                {% if w.expected_date %} · by
+                  <span class="{% if not w.resolved and w.expected_date < today %}wb-wtod{% endif %}">{{ w.expected_date|date:"M j" }}{% if not w.resolved and w.expected_date < today %} overdue{% endif %}</span>
+                {% endif %}
+              </div>
+            </div>
+            {% if not w.resolved %}
+            <button class="wb-wtr"
+                    data-wait-pk="{{ w.pk }}"
+                    data-ticket-pk="{{ t.pk }}"
+                    data-url="{% url 'tickets:waiting_on_resolve' w.pk %}"
+                    onclick="wbWaitResolve(this)">
+              <i class="bi bi-check-lg"></i> Got it
+            </button>
+            {% else %}
+            <span style="font-size:.72rem;color:#16a34a"><i class="bi bi-check-lg"></i> Done</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+          <form method="post" action="{% url 'tickets:waiting_on_add' t.pk %}" class="d-flex gap-1 mt-2">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="/?tab=todo&reopen={{ t.pk }}">
+            <input type="text" name="what" class="form-control form-control-sm" placeholder="Waiting on…" style="font-size:0.78rem" autocomplete="off">
+            <input type="text" name="from_who" class="form-control form-control-sm" placeholder="From who (optional)" style="font-size:0.78rem;max-width:140px" autocomplete="off">
+            <button type="submit" class="btn btn-sm btn-outline-warning px-2 py-0 flex-shrink-0 text-dark">+ Add</button>
+          </form>
+        </div>
+      </div>
+
+      {% if row.recent_emails %}
+      <div class="wb-dsec">
+        <div class="wb-dsh">
+          <i class="bi bi-chat-text text-secondary"></i> Conversations
+          <span class="badge bg-secondary ms-auto" style="font-size:.6rem">{{ row.email_count }} email{{ row.email_count|pluralize }}</span>
+        </div>
+        <div class="wb-dsb">
+          {% for email in row.recent_emails %}
+          <div class="wb-ci">
+            <span class="wb-cdot {% if forloop.first %}latest{% else %}older{% endif %}"></span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;justify-content:space-between;gap:.5rem">
+                <span class="wb-csender">{{ email.sender|default:"—" }}</span>
+                <span class="wb-cdate">{{ email.received_at|date:"M j, g:i A" }}</span>
+              </div>
+              {% if email.body_preview %}<div class="wb-cprev">{{ email.body_preview }}</div>{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="wb-dsec">
+        <div class="wb-dsh"><i class="bi bi-sticky text-secondary"></i> Notes</div>
+        <div class="wb-dsb">
+          <textarea id="wb-note-ta-{{ t.pk }}" class="form-control form-control-sm" rows="3"
+                    placeholder="Add or edit notes…"
+                    style="font-size:0.78rem;resize:none">{{ t.notes|default:'' }}</textarea>
+          <div class="d-flex align-items-center gap-2 mt-1">
+            <button class="btn btn-primary btn-sm py-0" style="font-size:0.75rem"
+                    onclick="wbSaveNote({{ t.pk }})">
+              <i class="bi bi-send me-1"></i>Save note
+            </button>
+            <span id="wb-note-msg-{{ t.pk }}" style="font-size:.72rem;color:#16a34a"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% endwith %}{% endfor %}{% endfor %}
   </div>
 
-</div>{# /work-grid #}
-{% endif %}
-{% endfor %}
+</div>
 
-{% endif %}{# end work_groups_list #}
+{% endif %}{# end work_ticket_total #}
+
+<script>
+var wbActivePk = null;
+
+function wbOpenTicket(pk) {
+  if (wbActivePk) {
+    var prev = document.getElementById('wbd-' + wbActivePk);
+    if (prev) prev.style.display = 'none';
+    var prevRow = document.querySelector('.wb-trow[data-pk="' + wbActivePk + '"]');
+    if (prevRow) prevRow.classList.remove('active');
+  }
+  document.getElementById('wbd-empty').style.display = 'none';
+  var panel = document.getElementById('wbd-' + pk);
+  if (panel) panel.style.display = '';
+  var row = document.querySelector('.wb-trow[data-pk="' + pk + '"]');
+  if (row) row.classList.add('active');
+  document.getElementById('wbSplit').classList.add('panel-open');
+  document.getElementById('wbDetail').scrollTop = 0;
+  wbActivePk = pk;
+}
+
+function wbClosePanel() {
+  if (wbActivePk) {
+    var panel = document.getElementById('wbd-' + wbActivePk);
+    if (panel) panel.style.display = 'none';
+    var row = document.querySelector('.wb-trow[data-pk="' + wbActivePk + '"]');
+    if (row) row.classList.remove('active');
+    wbActivePk = null;
+  }
+  document.getElementById('wbd-empty').style.display = '';
+  document.getElementById('wbSplit').classList.remove('panel-open');
+}
+
+function wbToggleFilter(btn) { btn.classList.toggle('on'); wbApplyFilters(); }
+
+function wbApplyFilters() {
+  var q = document.getElementById('wbSearch').value.toLowerCase();
+  var fTodo  = document.getElementById('wbFTodo').classList.contains('on');
+  var fWait  = document.getElementById('wbFWait').classList.contains('on');
+  var fReply = document.getElementById('wbFReply').classList.contains('on');
+  document.querySelectorAll('.wb-trow').forEach(function(r) {
+    var ok = (!q || r.dataset.subject.includes(q))
+          && (!fTodo  || r.dataset.todo    === '1')
+          && (!fWait  || r.dataset.waiting === '1')
+          && (!fReply || r.dataset.reply   === '1');
+    r.style.display = ok ? '' : 'none';
+  });
+}
+
+function wbCsrf() {
+  var m = document.cookie.match('(^|;) ?csrftoken=([^;]*)(;|$)');
+  return m ? m[2] : '';
+}
+
+function wbTodoDone(cb) {
+  if (!cb.checked) return;
+  var todoPk = cb.dataset.todoPk;
+  var ticketPk = cb.dataset.ticketPk;
+  var fd = new FormData();
+  fd.append('csrfmiddlewaretoken', wbCsrf());
+  fd.append('next', '/?tab=todo');
+  fetch(cb.dataset.url, {method:'POST', body:fd}).then(function(r) {
+    if (r.ok || r.redirected) {
+      var item = document.getElementById('wbtdi-' + todoPk);
+      if (item) item.classList.add('done');
+      cb.disabled = true;
+      wbDecrBadge(ticketPk, 'todo');
+    } else { cb.checked = false; }
+  });
+}
+
+function wbWaitResolve(btn) {
+  var waitPk = btn.dataset.waitPk;
+  var ticketPk = btn.dataset.ticketPk;
+  var fd = new FormData();
+  fd.append('csrfmiddlewaretoken', wbCsrf());
+  fetch(btn.dataset.url, {method:'POST', body:fd}).then(function(r) {
+    if (r.ok || r.redirected) {
+      var item = document.getElementById('wbwti-' + waitPk);
+      if (item) item.classList.add('resolved');
+      btn.outerHTML = '<span style="font-size:.72rem;color:#16a34a"><i class="bi bi-check-lg"></i> Done</span>';
+      wbDecrBadge(ticketPk, 'wait');
+    } else { alert('Could not save. Please try again.'); }
+  });
+}
+
+function wbDecrBadge(ticketPk, type) {
+  var row = document.querySelector('.wb-trow[data-pk="' + ticketPk + '"]');
+  if (!row) return;
+  if (type === 'todo') {
+    var n = Math.max(0, parseInt(row.dataset.openTodoCount || '0') - 1);
+    row.dataset.openTodoCount = n; row.dataset.todo = n > 0 ? '1' : '0';
+    var rb = document.getElementById('wb-rb-todo-' + ticketPk);
+    var pb = document.getElementById('wbd-todo-badge-' + ticketPk);
+    if (n === 0) { if (rb) rb.remove(); } else if (rb) { rb.innerHTML = '<i class="bi bi-check2-square"></i> ' + n; }
+    if (pb) pb.textContent = n + ' open';
+  } else {
+    var n2 = Math.max(0, parseInt(row.dataset.openWaitCount || '0') - 1);
+    row.dataset.openWaitCount = n2; row.dataset.waiting = n2 > 0 ? '1' : '0';
+    var rb2 = document.getElementById('wb-rb-wait-' + ticketPk);
+    var pb2 = document.getElementById('wbd-wait-badge-' + ticketPk);
+    if (n2 === 0) { if (rb2) rb2.remove(); } else if (rb2) { rb2.innerHTML = '<i class="bi bi-hourglass-split"></i> ' + n2; }
+    if (pb2) pb2.textContent = n2 + ' open';
+  }
+}
+
+function wbSaveSubject(pk, el) {
+  var newSubj = el.textContent.trim();
+  if (!newSubj || newSubj === el.dataset.orig) return;
+  el.dataset.orig = newSubj;
+  var form = document.getElementById('upd-' + pk);
+  if (!form) return;
+  var si = form.querySelector('[name="subject"]');
+  if (si) si.value = newSubj;
+  fetch(form.action, {method:'POST', body:new FormData(form)}).then(function() {
+    // update subject display in the list row
+    var row = document.querySelector('.wb-trow[data-pk="' + pk + '"]');
+    if (row) {
+      var idx = newSubj.indexOf(' | ');
+      var display = idx > -1 ? newSubj.slice(idx + 3) : newSubj;
+      var s = row.querySelector('.wb-t-subject');
+      if (s) s.textContent = display;
+      row.dataset.subject = newSubj.toLowerCase();
+    }
+  });
+}
+
+function wbSaveNote(pk) {
+  var ta = document.getElementById('wb-note-ta-' + pk);
+  var form = document.getElementById('upd-' + pk);
+  if (!form || !ta) return;
+  var ni = form.querySelector('[name="notes"]');
+  if (ni) ni.value = ta.value;
+  fetch(form.action, {method:'POST', body:new FormData(form)}).then(function() {
+    var msg = document.getElementById('wb-note-msg-' + pk);
+    if (msg) { msg.textContent = 'Saved!'; setTimeout(function() { msg.textContent = ''; }, 2000); }
+  });
+}
+
+// Auto-reopen panel after add-todo / add-waiting form submissions
+(function() {
+  var m = location.search.match(/[?&]reopen=(\d+)/);
+  if (m) wbOpenTicket(parseInt(m[1], 10));
+})();
+</script>
 
 {# ── STALE TAB ── #}
 {% elif active_tab == "stale" %}
