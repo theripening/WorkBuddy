@@ -481,10 +481,10 @@ def sync_outlook(request):
         messages.error(request, f"Sync failed: {e}")
         return redirect("tickets:list")
 
-    # Push current subjects/priorities for all assigned open tickets to cloud,
-    # then pull back any subject edits made on the cloud side.
+    # Pull cloud subject edits first, then push local state back out
     try:
-        from .cloud import push_ticket, pull_subjects_from_cloud
+        from .cloud import pull_subjects_from_cloud, push_ticket
+        pull_subjects_from_cloud()
         assigned = (
             Ticket.objects
             .filter(assignee__isnull=False)
@@ -495,7 +495,6 @@ def sync_outlook(request):
         for t in assigned:
             if t.assignee and t.assignee.email:
                 push_ticket(t, t.assignee.email)
-        pull_subjects_from_cloud()
     except Exception:
         pass
 
@@ -504,6 +503,14 @@ def sync_outlook(request):
 
 @require_POST
 def sync_new_outlook(request):
+    # 1. Pull cloud subject edits into local DB first
+    try:
+        from .cloud import pull_subjects_from_cloud, push_ticket
+        pull_subjects_from_cloud()
+    except Exception:
+        pass
+
+    # 2. Sync new Outlook tickets
     try:
         from .sync import sync_new_flagged
         new_tickets, new_emails = sync_new_flagged()
@@ -512,8 +519,8 @@ def sync_new_outlook(request):
         messages.error(request, f"Quick sync failed: {e}")
         return redirect("tickets:list")
 
+    # 3. Push current local state (including any just-pulled edits) to cloud
     try:
-        from .cloud import push_ticket, pull_subjects_from_cloud
         assigned = (
             Ticket.objects
             .filter(assignee__isnull=False)
@@ -524,7 +531,6 @@ def sync_new_outlook(request):
         for t in assigned:
             if t.assignee and t.assignee.email:
                 push_ticket(t, t.assignee.email)
-        pull_subjects_from_cloud()
     except Exception:
         pass
 
