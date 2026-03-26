@@ -261,6 +261,48 @@ def resolve_waiting(waiting):
         logger.warning("Cloud resolve_waiting failed for waiting %d: %s", waiting.pk, e)
 
 
+def pull_subjects_from_cloud():
+    """
+    For every assigned open ticket, fetch its current subject from the cloud
+    and update the local DB if the cloud version differs.
+    Returns count of tickets updated.
+    """
+    from .models import Ticket
+
+    url = _base_url()
+    if not url:
+        return 0
+
+    tickets = (
+        Ticket.objects
+        .filter(assignee__isnull=False)
+        .exclude(status="completed")
+        .prefetch_related("emails")
+    )
+
+    updated = 0
+    for ticket in tickets:
+        email = ticket.emails.filter(is_seed=True).first() or ticket.emails.first()
+        if not email:
+            continue
+        conv_id = email.conversation_id
+        try:
+            r = requests.get(f"{url}/api/tickets/{conv_id}/", timeout=_TIMEOUT)
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            cloud_subject = r.json().get("subject", "").strip()
+            if cloud_subject and cloud_subject != ticket.subject:
+                ticket.subject = cloud_subject
+                ticket.save(update_fields=["subject", "updated_at"])
+                logger.info("Pulled updated subject for ticket %d from cloud", ticket.pk)
+                updated += 1
+        except Exception as e:
+            logger.warning("Cloud pull_subject failed for ticket %d: %s", ticket.pk, e)
+
+    return updated
+
+
 def sync_cloud_notes(my_email):
     """
     Pull cloud tickets and store any new notes locally as CloudNote records.

@@ -481,9 +481,10 @@ def sync_outlook(request):
         messages.error(request, f"Sync failed: {e}")
         return redirect("tickets:list")
 
-    # Push current subjects/priorities for all assigned open tickets to cloud
+    # Push current subjects/priorities for all assigned open tickets to cloud,
+    # then pull back any subject edits made on the cloud side.
     try:
-        from .cloud import push_ticket
+        from .cloud import push_ticket, pull_subjects_from_cloud
         assigned = (
             Ticket.objects
             .filter(assignee__isnull=False)
@@ -494,6 +495,7 @@ def sync_outlook(request):
         for t in assigned:
             if t.assignee and t.assignee.email:
                 push_ticket(t, t.assignee.email)
+        pull_subjects_from_cloud()
     except Exception:
         pass
 
