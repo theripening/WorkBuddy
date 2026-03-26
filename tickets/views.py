@@ -479,6 +479,24 @@ def sync_outlook(request):
         messages.success(request, f"Sync complete — {new_tickets} new ticket(s), {new_emails} new email(s).")
     except Exception as e:
         messages.error(request, f"Sync failed: {e}")
+        return redirect("tickets:list")
+
+    # Push current subjects/priorities for all assigned open tickets to cloud
+    try:
+        from .cloud import push_ticket
+        assigned = (
+            Ticket.objects
+            .filter(assignee__isnull=False)
+            .exclude(assignee__email="")
+            .exclude(status="completed")
+            .select_related("assignee")
+        )
+        for t in assigned:
+            if t.assignee and t.assignee.email:
+                push_ticket(t, t.assignee.email)
+    except Exception:
+        pass
+
     return redirect("tickets:list")
 
 
