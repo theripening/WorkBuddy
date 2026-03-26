@@ -510,6 +510,24 @@ def sync_new_outlook(request):
         messages.success(request, f"Quick sync complete — {new_tickets} new ticket(s).")
     except Exception as e:
         messages.error(request, f"Quick sync failed: {e}")
+        return redirect("tickets:list")
+
+    try:
+        from .cloud import push_ticket, pull_subjects_from_cloud
+        assigned = (
+            Ticket.objects
+            .filter(assignee__isnull=False)
+            .exclude(assignee__email="")
+            .exclude(status="completed")
+            .select_related("assignee")
+        )
+        for t in assigned:
+            if t.assignee and t.assignee.email:
+                push_ticket(t, t.assignee.email)
+        pull_subjects_from_cloud()
+    except Exception:
+        pass
+
     return redirect("tickets:list")
 
 
