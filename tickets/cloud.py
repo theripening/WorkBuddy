@@ -193,7 +193,12 @@ def push_todo(ticket, todo):
     try:
         r = requests.post(
             f"{url}/api/tickets/{conv_id}/todos/",
-            json={"external_id": todo.pk, "text": todo.what},
+            json={
+                "external_id": todo.pk,
+                "text": todo.what,
+                "due_date": todo.due_date.isoformat() if todo.due_date else None,
+                "assigned_to": todo.assignee.name if todo.assignee else "",
+            },
             timeout=_TIMEOUT,
         )
         r.raise_for_status()
