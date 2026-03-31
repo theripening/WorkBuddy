@@ -225,6 +225,7 @@ def dashboard(request):
         "current_assignee": assignee_filter,
         "current_priority": priority_filter,
         "search": search,
+        "all_open_tickets": all_tickets.order_by("subject"),
     })
 
 

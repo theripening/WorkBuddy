@@ -665,12 +665,72 @@ function wbSaveNote(pk) {
                 {% endfor %}
             </select>
         </td>
-        <td><a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Triage</a></td>
+        <td class="text-nowrap">
+            <a href="{% url 'tickets:detail' t.pk %}" class="btn btn-sm btn-outline-primary">Triage</a>
+            <button type="button" class="btn btn-sm btn-outline-warning ms-1 triage-merge-btn"
+                    title="Merge into another ticket"
+                    data-pk="{{ t.pk }}" data-subject="{{ t.subject|escapejs }}">
+                <i class="bi bi-arrow-down-up"></i>
+            </button>
+        </td>
     </tr>
     {% endwith %}{% endfor %}
     </tbody>
 </table>
 </div>
+
+{# Merge modal #}
+<div class="modal fade" id="triageMergeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-arrow-down-up me-2"></i>Merge Ticket</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="triageMergeForm" method="post" action="">
+        {% csrf_token %}
+        <input type="hidden" name="source_ticket" id="triageMergeSourcePk">
+        <div class="modal-body">
+          <p class="small mb-1 text-muted">Merging: <strong id="triageMergeSourceSubject" class="text-dark"></strong></p>
+          <p class="small text-muted mb-3">All emails will be moved into the selected ticket and this ticket will be deleted.</p>
+          <label class="form-label small fw-semibold">Merge into:</label>
+          <select id="triageMergeTarget" class="form-select form-select-sm" required>
+            <option value="">— Select a ticket —</option>
+            {% for ot in all_open_tickets %}
+            <option value="{{ ot.pk }}" data-url="{% url 'tickets:merge' ot.pk %}">{{ ot.subject }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-warning btn-sm"><i class="bi bi-arrow-down-up me-1"></i>Merge</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.triage-merge-btn');
+  if (!btn) return;
+  document.getElementById('triageMergeSourcePk').value = btn.dataset.pk;
+  document.getElementById('triageMergeSourceSubject').textContent = btn.dataset.subject;
+  var sel = document.getElementById('triageMergeTarget');
+  sel.value = '';
+  Array.from(sel.options).forEach(function(o) { o.hidden = !!(o.value && o.value === btn.dataset.pk); });
+  new bootstrap.Modal(document.getElementById('triageMergeModal')).show();
+});
+document.getElementById('triageMergeForm').addEventListener('submit', function(e) {
+  var sel = document.getElementById('triageMergeTarget');
+  var opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) { e.preventDefault(); return; }
+  if (!confirm('Merge "' + document.getElementById('triageMergeSourceSubject').textContent + '" into "' + opt.text + '"?\n\nThe source ticket will be deleted.')) {
+    e.preventDefault(); return;
+  }
+  this.action = opt.getAttribute('data-url');
+});
+</script>
+
 {% else %}
 <div class="text-center text-muted py-4"><i class="bi bi-question-circle display-4 d-block mb-2"></i>All tickets have a to-do or something being waited on.</div>
 {% endif %}
