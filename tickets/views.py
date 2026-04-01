@@ -33,7 +33,10 @@ def _ticket_row(t, assignee_email=None):
         and latest.sender.lower() != assignee_email.lower()
     )
     all_emails = list(t.emails.all())
-    recent_emails = sorted(all_emails, key=lambda e: e.received_at, reverse=True)[:5]
+    thread_map = {}
+    for email in all_emails:
+        thread_map.setdefault(email.conversation_id, []).append(email)
+    threads = sorted(thread_map.values(), key=lambda th: th[0].received_at, reverse=True)
     return {
         "ticket": t,
         "latest": latest,
@@ -42,7 +45,7 @@ def _ticket_row(t, assignee_email=None):
         "open_todo_count": open_todo_count,
         "open_waiting_count": open_waiting_count,
         "has_reply": has_reply,
-        "recent_emails": recent_emails,
+        "threads": threads,
         "email_count": len(all_emails),
     }
 

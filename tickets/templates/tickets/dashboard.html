@@ -188,6 +188,18 @@
 .wb-csender { font-size:0.78rem; font-weight:600; color:#111827; }
 .wb-cdate   { font-size:0.68rem; color:#9ca3af; }
 .wb-cprev   { font-size:0.72rem; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wb-conv-row { padding:5px 2px; border-bottom:1px solid #f3f4f6; cursor:pointer; }
+.wb-conv-row:last-child { border-bottom:none; }
+.wb-conv-row:hover { background:#f8faff; }
+.wb-conv-hdr { display:flex; align-items:center; gap:6px; }
+.wb-conv-body { display:none; padding:4px 0 4px 14px; font-size:0.78rem; color:#374151; white-space:pre-wrap; word-break:break-word; line-height:1.5; }
+.wb-conv-body.open { display:block; }
+.wb-conv-thread { border-top:1px dashed #e5e7eb; margin-top:4px; padding-top:4px; display:none; }
+.wb-conv-thread.open { display:block; }
+.wb-conv-te { padding:4px 0 4px 0; border-bottom:1px dotted #f0f0f0; }
+.wb-conv-te:last-child { border-bottom:none; }
+.wb-conv-te-meta { font-size:0.72rem; font-weight:600; color:#6b7280; margin-bottom:2px; }
+.wb-conv-te-body { font-size:0.75rem; color:#374151; white-space:pre-wrap; word-break:break-word; line-height:1.5; }
 .wb-det-link { font-size:0.72rem; color:#6b7280; text-decoration:none; }
 .wb-det-link:hover { color:#2563eb; }
 </style>
@@ -351,25 +363,40 @@
         </div>
       </div>
 
-      {% if row.recent_emails %}
+      {% if row.threads %}
       <div class="wb-dsec">
         <div class="wb-dsh">
-          <i class="bi bi-chat-text text-secondary"></i> Conversations
-          <span class="badge bg-secondary ms-auto" style="font-size:.6rem">{{ row.email_count }} email{{ row.email_count|pluralize }}</span>
+          <i class="bi bi-envelope text-secondary"></i> Emails
+          <span class="badge bg-secondary ms-auto" style="font-size:.6rem">{{ row.email_count }} email{{ row.email_count|pluralize }} &middot; {{ row.threads|length }} thread{{ row.threads|length|pluralize }}</span>
         </div>
-        <div class="wb-dsb">
-          {% for email in row.recent_emails %}
-          <div class="wb-ci">
-            <span class="wb-cdot {% if forloop.first %}latest{% else %}older{% endif %}"></span>
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;justify-content:space-between;gap:.5rem">
-                <span class="wb-csender">{{ email.sender|default:"—" }}</span>
-                <span class="wb-cdate">{{ email.received_at|date:"M j, g:i A" }}</span>
+        <div class="wb-dsb" style="padding:.25rem .4rem">
+          {% for thread in row.threads %}{% with latest=thread.0 %}
+          <div class="wb-conv-row">
+            <div class="wb-conv-hdr" onclick="wbConvToggle('wbconv-{{ latest.pk }}', this)">
+              <span class="wb-cdot {% if forloop.first %}latest{% else %}older{% endif %}" style="flex-shrink:0;margin-top:1px"></span>
+              <span class="wb-csender" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ latest.sender|default:"—" }}</span>
+              <span class="wb-cdate" style="flex-shrink:0">{{ latest.received_at|date:"M j, g:i A" }}</span>
+              <i class="bi bi-chevron-down" style="font-size:.65rem;color:#9ca3af;flex-shrink:0;transition:transform .15s" id="wbconv-chev-{{ latest.pk }}"></i>
+            </div>
+            <div id="wbconv-{{ latest.pk }}" class="wb-conv-body">
+              {{ latest.body_preview|default:"(no preview available)" }}
+              {% if thread|length > 1 %}
+              <button class="btn btn-link btn-sm p-0 mt-1" style="font-size:.72rem"
+                      onclick="event.stopPropagation();wbThreadToggle('wbthread-{{ latest.pk }}', this)">
+                <i class="bi bi-chevron-down me-1"></i>Show {{ thread|length|add:"-1" }} more email{{ thread|length|add:"-1"|pluralize }}
+              </button>
+              <div id="wbthread-{{ latest.pk }}" class="wb-conv-thread">
+                {% for email in thread|slice:"1:" %}
+                <div class="wb-conv-te">
+                  <div class="wb-conv-te-meta">{{ email.sender|default:"Unknown" }} &bull; {{ email.received_at|date:"M j, Y g:i A" }}</div>
+                  <div class="wb-conv-te-body">{{ email.body_preview|default:"(no preview)" }}</div>
+                </div>
+                {% endfor %}
               </div>
-              {% if email.body_preview %}<div class="wb-cprev">{{ email.body_preview }}</div>{% endif %}
+              {% endif %}
             </div>
           </div>
-          {% endfor %}
+          {% endwith %}{% endfor %}
         </div>
       </div>
       {% endif %}
@@ -423,6 +450,23 @@
 
 <script>
 var wbActivePk = null;
+
+function wbConvToggle(id, hdr) {
+  var body = document.getElementById(id);
+  var chev = document.getElementById('wbconv-chev-' + id.replace('wbconv-', ''));
+  if (!body) return;
+  var open = body.classList.toggle('open');
+  if (chev) chev.style.transform = open ? 'rotate(180deg)' : '';
+}
+
+function wbThreadToggle(id, btn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var open = el.classList.toggle('open');
+  btn.innerHTML = open
+    ? '<i class="bi bi-chevron-up me-1"></i>Hide older emails'
+    : btn.innerHTML.replace('Hide older emails', btn.dataset.label || 'Show older emails');
+}
 
 function wbOpenTicket(pk) {
   if (wbActivePk) {
