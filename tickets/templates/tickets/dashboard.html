@@ -376,7 +376,14 @@
               <span class="wb-cdot {% if forloop.first %}latest{% else %}older{% endif %}" style="flex-shrink:0;margin-top:1px"></span>
               <span class="wb-csender" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ latest.sender|default:"—" }}</span>
               <span class="wb-cdate" style="flex-shrink:0">{{ latest.received_at|date:"M j, g:i A" }}</span>
-              <i class="bi bi-chevron-down" style="font-size:.65rem;color:#9ca3af;flex-shrink:0;transition:transform .15s" id="wbconv-chev-{{ latest.pk }}"></i>
+              <form method="post" action="{% url 'tickets:open_in_outlook' latest.pk %}" onclick="event.stopPropagation()" style="flex-shrink:0">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="/?tab=todo&reopen={{ t.pk }}">
+                <button type="submit" class="btn btn-link p-0 ms-1" style="font-size:.68rem;color:#6b7280;line-height:1" title="Open in Outlook">
+                  <i class="bi bi-envelope-open"></i>
+                </button>
+              </form>
+              <i class="bi bi-chevron-down" style="font-size:.65rem;color:#9ca3af;flex-shrink:0;transition:transform .15s;margin-left:2px" id="wbconv-chev-{{ latest.pk }}"></i>
             </div>
             <div id="wbconv-{{ latest.pk }}" class="wb-conv-body">
               {{ latest.body_preview|default:"(no preview available)" }}
@@ -388,7 +395,16 @@
               <div id="wbthread-{{ latest.pk }}" class="wb-conv-thread">
                 {% for email in thread|slice:"1:" %}
                 <div class="wb-conv-te">
-                  <div class="wb-conv-te-meta">{{ email.sender|default:"Unknown" }} &bull; {{ email.received_at|date:"M j, Y g:i A" }}</div>
+                  <div class="wb-conv-te-meta d-flex align-items-center gap-2">
+                    <span>{{ email.sender|default:"Unknown" }} &bull; {{ email.received_at|date:"M j, Y g:i A" }}</span>
+                    <form method="post" action="{% url 'tickets:open_in_outlook' email.pk %}" style="margin-left:auto">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="/?tab=todo&reopen={{ t.pk }}">
+                      <button type="submit" class="btn btn-link p-0" style="font-size:.68rem;color:#6b7280;line-height:1" title="Open in Outlook">
+                        <i class="bi bi-envelope-open"></i>
+                      </button>
+                    </form>
+                  </div>
                   <div class="wb-conv-te-body">{{ email.body_preview|default:"(no preview)" }}</div>
                 </div>
                 {% endfor %}
