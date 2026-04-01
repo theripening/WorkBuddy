@@ -505,11 +505,20 @@ def sync_outlook(request):
 
 @require_POST
 def sync_new_outlook(request):
-    # 1. Pull cloud subject edits + team-created todos/waitings into local DB first
+    # 1. Pull cloud subject edits, team-created todos/waitings, and notes
     try:
-        from .cloud import pull_subjects_from_cloud, pull_cloud_items, push_ticket
+        from .cloud import pull_subjects_from_cloud, pull_cloud_items, sync_cloud_notes, get_my_email
+        import win32com.client, pythoncom
+        pythoncom.CoInitialize()
+        try:
+            ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+            my_email = get_my_email(ns)
+        finally:
+            pythoncom.CoUninitialize()
         pull_subjects_from_cloud()
         pull_cloud_items()
+        if my_email:
+            sync_cloud_notes(my_email)
     except Exception:
         pass
 
