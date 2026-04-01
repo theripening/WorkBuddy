@@ -91,6 +91,7 @@ class TodoItem(models.Model):
     due_date = models.DateField(null=True, blank=True)
     done = models.BooleanField(default=False)
     done_at = models.DateTimeField(null=True, blank=True)
+    cloud_id = models.IntegerField(null=True, blank=True, db_index=True)  # SharedTodo.pk on EBPP_INFOTOOLS
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -112,6 +113,7 @@ class WaitingOn(models.Model):
     expected_date = models.DateField(null=True, blank=True)
     resolved = models.BooleanField(default=False)
     resolved_at = models.DateField(null=True, blank=True)
+    cloud_id = models.IntegerField(null=True, blank=True, db_index=True)  # SharedWaitingOn.pk on EBPP_INFOTOOLS
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

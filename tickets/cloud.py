@@ -266,6 +266,106 @@ def resolve_waiting(waiting):
         logger.warning("Cloud resolve_waiting failed for waiting %d: %s", waiting.pk, e)
 
 
+def pull_cloud_items():
+    """
+    For every assigned open ticket, pull any todos and waiting-on items that were
+    created on the cloud (external_id is null) and create them locally.
+    After creating locally, PATCHes the cloud to set external_id so it won't
+    be re-imported next time.
+    Returns (new_todos, new_waitings) counts.
+    """
+    from .models import Ticket, TicketEmail, TodoItem, WaitingOn
+
+    url = _base_url()
+    if not url:
+        return 0, 0
+
+    tickets = (
+        Ticket.objects
+        .filter(assignee__isnull=False)
+        .exclude(status="completed")
+        .prefetch_related("emails")
+    )
+
+    new_todos = 0
+    new_waitings = 0
+
+    for ticket in tickets:
+        email = ticket.emails.filter(is_seed=True).first() or ticket.emails.first()
+        if not email:
+            continue
+        conv_id = email.conversation_id
+
+        try:
+            r = requests.get(f"{url}/api/tickets/{conv_id}/", timeout=_TIMEOUT)
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            logger.warning("pull_cloud_items: failed to fetch ticket %s: %s", conv_id[:16], e)
+            continue
+
+        # Track existing cloud_ids to avoid duplicates
+        existing_todo_cloud_ids = set(ticket.todos.filter(cloud_id__isnull=False).values_list("cloud_id", flat=True))
+        existing_wait_cloud_ids = set(ticket.waiting_on.filter(cloud_id__isnull=False).values_list("cloud_id", flat=True))
+
+        for td in data.get("todos", []):
+            # Only import cloud-created (no external_id) items we haven't seen yet
+            if td.get("external_id"):
+                continue
+            cloud_id = td["cloud_id"]
+            if cloud_id in existing_todo_cloud_ids:
+                continue
+            from django.utils.dateparse import parse_date
+            todo = TodoItem.objects.create(
+                ticket=ticket,
+                what=td["text"],
+                due_date=parse_date(td["due_date"]) if td.get("due_date") else None,
+                done=td.get("completed", False),
+                cloud_id=cloud_id,
+            )
+            new_todos += 1
+            # Tell the cloud what the new local ID is
+            try:
+                requests.post(
+                    f"{url}/api/todos/{cloud_id}/set-external/",
+                    json={"external_id": todo.pk},
+                    timeout=_TIMEOUT,
+                )
+            except Exception as e:
+                logger.warning("pull_cloud_items: set-external failed for todo cloud_id=%d: %s", cloud_id, e)
+
+        for w in data.get("waiting_on", []):
+            if w.get("external_id"):
+                continue
+            cloud_id = w["cloud_id"]
+            if cloud_id in existing_wait_cloud_ids:
+                continue
+            from django.utils.dateparse import parse_date
+            waiting = WaitingOn.objects.create(
+                ticket=ticket,
+                what=w["what"],
+                from_who=w.get("from_who", ""),
+                expected_date=parse_date(w["expected_date"]) if w.get("expected_date") else None,
+                resolved=w.get("resolved", False),
+                cloud_id=cloud_id,
+            )
+            new_waitings += 1
+            try:
+                requests.post(
+                    f"{url}/api/waiting/{cloud_id}/set-external/",
+                    json={"external_id": waiting.pk},
+                    timeout=_TIMEOUT,
+                )
+            except Exception as e:
+                logger.warning("pull_cloud_items: set-external failed for waiting cloud_id=%d: %s", cloud_id, e)
+
+    if new_todos or new_waitings:
+        logger.info("pull_cloud_items: %d new todo(s), %d new waiting-on(s) imported", new_todos, new_waitings)
+    return new_todos, new_waitings
+
+
 def pull_subjects_from_cloud():
     """
     For every assigned open ticket, fetch its current subject from the cloud

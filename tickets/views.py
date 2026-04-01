@@ -482,10 +482,11 @@ def sync_outlook(request):
         messages.error(request, f"Sync failed: {e}")
         return redirect("tickets:list")
 
-    # Pull cloud subject edits first, then push local state back out
+    # Pull cloud subject edits + team-created todos/waitings, then push local state back out
     try:
-        from .cloud import pull_subjects_from_cloud, push_ticket
+        from .cloud import pull_subjects_from_cloud, pull_cloud_items, push_ticket
         pull_subjects_from_cloud()
+        pull_cloud_items()
         assigned = (
             Ticket.objects
             .filter(assignee__isnull=False)
@@ -504,10 +505,11 @@ def sync_outlook(request):
 
 @require_POST
 def sync_new_outlook(request):
-    # 1. Pull cloud subject edits into local DB first
+    # 1. Pull cloud subject edits + team-created todos/waitings into local DB first
     try:
-        from .cloud import pull_subjects_from_cloud, push_ticket
+        from .cloud import pull_subjects_from_cloud, pull_cloud_items, push_ticket
         pull_subjects_from_cloud()
+        pull_cloud_items()
     except Exception:
         pass
 
