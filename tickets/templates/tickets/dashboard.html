@@ -374,8 +374,31 @@
       </div>
       {% endif %}
 
+      {% if t.cloud_notes.all %}
       <div class="wb-dsec">
-        <div class="wb-dsh"><i class="bi bi-sticky text-secondary"></i> Notes</div>
+        <div class="wb-dsh">
+          <i class="bi bi-cloud text-info"></i> Team Notes
+          <span class="badge bg-info text-dark ms-auto" style="font-size:.6rem">{{ t.cloud_notes.count }}</span>
+        </div>
+        <div class="wb-dsb">
+          {% for cn in t.cloud_notes.all %}
+          <div class="wb-ci" style="align-items:flex-start">
+            <span class="wb-cdot" style="background:#0ea5e9;margin-top:5px"></span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;justify-content:space-between;gap:.5rem">
+                <span class="wb-csender">{{ cn.author_email }}</span>
+                <span class="wb-cdate">{{ cn.created_at|date:"M j, g:i A" }}</span>
+              </div>
+              <div style="font-size:0.78rem;color:#374151;white-space:pre-wrap;margin-top:2px">{{ cn.text }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="wb-dsec">
+        <div class="wb-dsh"><i class="bi bi-sticky text-secondary"></i> My Notes</div>
         <div class="wb-dsb">
           <textarea id="wb-note-ta-{{ t.pk }}" class="form-control form-control-sm" rows="3"
                     placeholder="Add or edit notes…"
